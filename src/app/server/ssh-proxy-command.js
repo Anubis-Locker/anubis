@@ -81,14 +81,36 @@ function detectNetbird (host, port) {
 const detectCache = new Map()
 
 /**
- * build proxy command command/args from template string with %h %p %r placeholders
+ * Build command/args with quoted paths and %h %p %r placeholders.
+ * Quotes only group arguments; shell expansion and shell operators are not run.
  */
 function expandProxyCommand (command, { host, port, username }) {
-  const expanded = command
-    .replace(/%h/g, host)
-    .replace(/%p/g, String(port))
-    .replace(/%r/g, username || '')
-  return expanded.trim().split(/\s+/).filter(Boolean)
+  const args = []
+  let current = ''
+  let quote
+  let started = false
+  for (const char of command) {
+    if (quote) {
+      if (char === quote) quote = undefined
+      else current += char
+    } else if (char === '"' || char === "'") {
+      quote = char
+      started = true
+    } else if (/\s/.test(char)) {
+      if (started) args.push(current)
+      current = ''
+      started = false
+    } else {
+      current += char
+      started = true
+    }
+  }
+  if (quote) throw new Error('Unterminated quote in SSH proxy command')
+  if (started) args.push(current)
+  // Preserve Windows path separators and never invoke a shell. Expand values
+  // after tokenizing so spaces in a username or host stay in one argument.
+  const values = { h: host, p: String(port), r: username || '' }
+  return args.map(arg => arg.replace(/%([hpr])/g, (_, key) => values[key]))
 }
 
 /**
@@ -157,69 +179,53 @@ async function runProxyCommand (command, args, { onMessage } = {}) {
     stderrBuf.push(text)
     onMessage && onMessage(text)
   })
-  const [bridge, socket] = await new Promise((resolve, reject) => {
-    let settled = false
-    const onSpawnError = (err) => {
-      if (settled) {
-        return
-      }
-      settled = true
-      reject(new Error(`proxy command failed to start: ${command}: ${err.message}`))
-    }
-    child.once('error', onSpawnError)
-    bridgeChildStdio(child).then(
-      ({ server, port }) => {
-        if (settled) {
-          return
-        }
-        settled = true
-        child.removeListener('error', onSpawnError)
-        const socket = net.connect(port, '127.0.0.1')
-        socket.once('connect', () => resolve([server, socket]))
-        socket.once('error', (err) => {
-          reject(err)
-        })
-      },
-      (err) => {
-        if (settled) {
-          return
-        }
-        settled = true
-        reject(err)
-      }
-    )
-  })
+  let bridge
+  let socket
   let disposed = false
   const dispose = () => {
-    if (disposed) {
-      return
-    }
+    if (disposed) return
     disposed = true
-    socket.destroy()
-    try {
-      child.stdin?.end()
-    } catch {
-
-    }
+    socket?.destroy()
+    child.stdin?.end()
     child.kill()
-    bridge.close()
-    log.log('proxy command disposed:', command, args.join(' '))
+    bridge?.close()
   }
-  child.once('exit', () => {
-    socket.destroy()
-  })
-  socket.once('close', () => {
-    if (!disposed) {
-      disposed = true
-      try {
-        child.stdin?.end()
-      } catch {
-
-      }
-      child.kill()
-      bridge.close()
+  await new Promise((resolve, reject) => {
+    let settled = false
+    const fail = (err) => {
+      dispose()
+      if (settled) return
+      settled = true
+      reject(err)
     }
+    child.once('error', (err) => {
+      fail(new Error(`proxy command failed to start: ${command}: ${err.message}`))
+    })
+    child.stdin.on('error', fail)
+    child.once('exit', (code, signal) => {
+      fail(new Error(`proxy command exited: ${command}: ${signal || code}`))
+    })
+    child.once('spawn', () => {
+      bridgeChildStdio(child).then(
+        ({ server, port }) => {
+          bridge = server
+          if (disposed) {
+            server.close()
+            return
+          }
+          socket = net.connect(port, '127.0.0.1')
+          socket.once('connect', () => {
+            if (settled) return
+            settled = true
+            resolve()
+          })
+          socket.once('error', fail)
+        },
+        fail
+      )
+    })
   })
+  socket.once('close', dispose)
   return {
     socket,
     dispose,

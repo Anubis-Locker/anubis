@@ -3,10 +3,9 @@ process.env.NODE_ENV = 'development'
 const { describe, test, beforeEach, afterEach } = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
-const os = require('node:os')
 const path = require('node:path')
 const { once } = require('node:events')
-const { spawnSync } = require('node:child_process')
+const { makeFixtureDir, generateKey: generateClientKey, startAgent } = require('./ssh-fixtures')
 const { setTimeout: delay } = require('node:timers/promises')
 const { Server, utils } = require('@ai-security-tool/ssh2')
 const { session } = require('../../../src/app/server/session-ssh')
@@ -40,7 +39,7 @@ function matchesPublicKey (ctx, publicKey) {
 }
 
 function makeTmpDir () {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'electerm-ssh-test-'))
+  return makeFixtureDir('electerm-ssh-test-')
 }
 
 function setEnvVar (name, value) {
@@ -48,46 +47,6 @@ function setEnvVar (name, value) {
     delete process.env[name]
   } else {
     process.env[name] = value
-  }
-}
-
-function runCommand (command, args, options = {}) {
-  const result = spawnSync(command, args, {
-    encoding: 'utf8',
-    ...options
-  })
-  if (result.error) {
-    throw result.error
-  }
-  if (result.status !== 0) {
-    throw new Error(`${command} ${args.join(' ')} failed: ${result.stderr || result.stdout}`)
-  }
-  return result.stdout
-}
-
-function generateClientKey ({ dir, name, type, passphrase, bits }) {
-  const keyPath = path.join(dir, name)
-  const args = ['-q', '-t', type]
-
-  if (bits) {
-    args.push('-b', String(bits))
-  }
-
-  args.push(
-    '-N',
-    passphrase || '',
-    '-f',
-    keyPath,
-    '-C',
-    `electerm-${name}`
-  )
-
-  runCommand('ssh-keygen', args)
-
-  return {
-    keyPath,
-    privateKey: fs.readFileSync(keyPath, 'utf8'),
-    publicKey: fs.readFileSync(`${keyPath}.pub`, 'utf8')
   }
 }
 
@@ -176,7 +135,9 @@ function publicKeyOnlyAuth (publicKey) {
       return ctx.reject(['publickey'])
     }
     if (ctx.method === 'publickey' && ctx.username === USERNAME && matchesPublicKey(ctx, publicKey)) {
-      return ctx.accept()
+      return !ctx.signature || parseKey(publicKey).verify(ctx.blob, ctx.signature, ctx.hashAlgo) === true
+        ? ctx.accept()
+        : ctx.reject(['publickey'])
     }
     return ctx.reject(['publickey'])
   }
@@ -295,31 +256,7 @@ function emptyLabelPasswordAuth () {
   }
 }
 
-function startAgent () {
-  const socketPath = path.join(os.tmpdir(), `ea-${process.pid}-${Date.now()}.sock`)
-  const output = runCommand('ssh-agent', ['-a', socketPath, '-s'])
-  const sock = output.match(/SSH_AUTH_SOCK=([^;]+)/)
-  const pid = output.match(/SSH_AGENT_PID=([^;]+)/)
-
-  if (!sock || !pid) {
-    throw new Error(`Unable to parse ssh-agent output: ${output}`)
-  }
-
-  const env = {
-    ...process.env,
-    SSH_AUTH_SOCK: sock[1],
-    SSH_AGENT_PID: pid[1]
-  }
-
-  return {
-    env,
-    kill () {
-      runCommand('ssh-agent', ['-k'], { env })
-    }
-  }
-}
-
-describe('session-ssh auth flows', () => {
+describe('session-ssh auth flows', { timeout: 20000 }, () => {
   let tmpDir
   let oldEnv
 
@@ -673,15 +610,8 @@ describe('session-ssh auth flows', () => {
   })
 
   test('connects with ssh agent only and leaves user keys untouched', async (t) => {
-    let agent
-    try {
-      agent = startAgent()
-    } catch (error) {
-      if (error.code === 'ENOENT') {
-        t.skip('ssh-agent is not available in this environment')
-      }
-      throw error
-    }
+    const agent = await startAgent()
+    t.after(() => agent.kill())
 
     const keyPair = generateClientKey({
       dir: tmpDir,
@@ -691,7 +621,7 @@ describe('session-ssh auth flows', () => {
     })
 
     try {
-      runCommand('ssh-add', [keyPair.keyPath], { env: agent.env })
+      agent.addKey(keyPair.keyPath)
       setEnvVar('SSH_AUTH_SOCK', agent.env.SSH_AUTH_SOCK)
       setEnvVar('SSH_AGENT_PID', agent.env.SSH_AGENT_PID)
 
@@ -709,13 +639,16 @@ describe('session-ssh auth flows', () => {
         }, createPromptWs(() => {
           throw new Error('ssh-agent login should not prompt')
         }))
+        assert.ok(agent.state.signatures > 0)
+        assert.equal(fs.readFileSync(keyPair.keyPath, 'utf8'), keyPair.privateKey)
+        assert.equal(fs.readFileSync(`${keyPair.keyPath}.pub`, 'utf8'), keyPair.publicKey)
       } finally {
         term && term.kill()
         await server.close()
       }
     } finally {
       if (agent) {
-        agent.kill()
+        await agent.kill()
       }
     }
   })

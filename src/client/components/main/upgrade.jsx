@@ -51,6 +51,8 @@ export default class Upgrade extends PureComponent {
   }
 
   componentWillUnmount () {
+    this.doUpgrade.cancel()
+    this.cancel()
     if (this.cleanupTimer) {
       clearInterval(this.cleanupTimer)
     }
@@ -74,6 +76,7 @@ export default class Upgrade extends PureComponent {
   }
 
   handleClose = () => {
+    this.cancel()
     window.store.upgradeInfo = {}
   }
 
@@ -85,23 +88,26 @@ export default class Upgrade extends PureComponent {
 
   onData = (upgradePercent) => {
     clearTimeout(this.downloadTimer)
-    if (upgradePercent >= 100) {
-      this.update && this.update.destroy()
-      return this.handleClose()
-    }
+    this.downloadTimer = setTimeout(this.timeout, downloadUpgradeTimeout)
     this.changeProps({
       upgradePercent
     })
   }
 
   onError = (e) => {
+    this.cancel()
     this.changeProps({
       error: e.message
     })
   }
 
   cancel = () => {
-    this.update && this.update.destroy()
+    clearTimeout(this.downloadTimer)
+    this.downloadTimer = null
+    this.downloadAttempt = null
+    const update = this.update
+    this.update = null
+    update && update.destroy()
     this.changeProps({
       upgrading: false,
       upgradePercent: 0
@@ -141,17 +147,35 @@ export default class Upgrade extends PureComponent {
       return
     }
     this.changeProps({
-      upgrading: true
+      upgrading: true,
+      upgradePercent: 0,
+      error: ''
     })
+    const attempt = {}
+    this.downloadAttempt = attempt
+    const callback = handler => (...args) => {
+      if (this.downloadAttempt === attempt) {
+        handler(...args)
+      }
+    }
     const proxy = window.store.getProxySetting()
-    this.update = await upgrade({
-      mirror: this.state.mirror,
-      proxy,
-      onData: this.onData,
-      onEnd: this.onEnd,
-      onError: this.onError
-    })
     this.downloadTimer = setTimeout(this.timeout, downloadUpgradeTimeout)
+    try {
+      const update = await upgrade({
+        mirror: this.state.mirror,
+        proxy,
+        onData: callback(this.onData),
+        onEnd: callback(this.onEnd),
+        onError: callback(this.onError)
+      })
+      if (this.downloadAttempt !== attempt) {
+        update.destroy()
+      } else {
+        this.update = update
+      }
+    } catch (err) {
+      callback(this.onError)(err)
+    }
   }, 100)
 
   handleSkipVersion = () => {
@@ -198,7 +222,12 @@ export default class Upgrade extends PureComponent {
     const canAutoUpgrade = installSrc || isWin || isMac
     let releaseInfo
     if (canAutoUpgrade) {
-      releaseInfo = await getLatestReleaseInfo()
+      try {
+        releaseInfo = await getLatestReleaseInfo()
+      } catch (err) {
+        this.onError(err)
+        return
+      }
     }
     this.changeProps({
       shouldUpgrade,

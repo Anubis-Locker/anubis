@@ -1,12 +1,27 @@
 process.env.NODE_ENV = 'development'
 
-const { describe, test, beforeEach, afterEach } = require('node:test')
+const { describe, test, beforeEach, afterEach, after, mock } = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
-const os = require('node:os')
 const path = require('node:path')
 const { once } = require('node:events')
+const childProcess = require('node:child_process')
 const { Server, utils } = require('@ai-security-tool/ssh2')
+const { makeFixtureDir } = require('./ssh-fixtures')
+const spawn = childProcess.spawn
+const executables = new Map()
+const invocations = []
+// A shebang is not executable on Windows. Model the netbird executable at
+// spawn's boundary, but run the fixture in a real native Node child process.
+mock.method(childProcess, 'spawn', (command, args, options) => {
+  const script = executables.get(command)
+  if (script) {
+    invocations.push({ command, args })
+    return spawn(process.execPath, [script, ...args], options)
+  }
+  return spawn(command, args, options)
+})
+after(() => mock.restoreAll())
 const {
   session
 } = require('../../../src/app/server/session-ssh')
@@ -23,7 +38,7 @@ const HOST_KEY = utils.generateKeyPairSync('ed25519', {
 })
 
 function makeTmpDir () {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'electerm-proxy-cmd-test-'))
+  return makeFixtureDir('electerm proxy cmd test-')
 }
 
 // in-process ssh server the fake netbird proxy forwards to
@@ -104,8 +119,9 @@ if (args[0] === 'ssh' && args[1] === 'proxy') {
 }
 process.exit(2)
 `
-  const p = path.join(dir, 'netbird')
+  const p = path.join(dir, 'netbird-fixture.js')
   fs.writeFileSync(p, script, { mode: 0o755 })
+  executables.set(p, p)
   return p
 }
 
@@ -139,6 +155,19 @@ describe('expandProxyCommand', () => {
       ['fixed', 'command']
     )
   })
+  test('preserves quoted executable paths, Windows separators and argument boundaries', () => {
+    assert.deepEqual(
+      expandProxyCommand('"C:\\Program Files\\Netbird\\netbird.exe" ssh proxy "%h" %p --user=%r', {
+        host: 'host.example', port: 2222, username: 'domain\\user name'
+      }),
+      ['C:\\Program Files\\Netbird\\netbird.exe', 'ssh', 'proxy', 'host.example', '2222', '--user=domain\\user name']
+    )
+    assert.deepEqual(
+      expandProxyCommand("'proxy tool' '' --host='%h'", { host: 'host name', port: 22 }),
+      ['proxy tool', '', '--host=host name']
+    )
+    assert.throws(() => expandProxyCommand('"unclosed', {}), /Unterminated quote/)
+  })
 })
 
 describe('isNetbirdLikeHost', () => {
@@ -155,13 +184,14 @@ describe('isNetbirdLikeHost', () => {
   })
 })
 
-describe('ssh proxy command', () => {
+describe('ssh proxy command', { timeout: 20000 }, () => {
   let tmpDir
   let server
   let netbirdPath
   let origBin
 
   beforeEach(async () => {
+    invocations.length = 0
     tmpDir = makeTmpDir()
     server = await startServer()
     netbirdPath = writeFakeNetbird(tmpDir, server.port, 0)
@@ -180,6 +210,7 @@ describe('ssh proxy command', () => {
     }
     await server.close()
     fs.rmSync(tmpDir, { recursive: true, force: true })
+    executables.clear()
   })
 
   test('connects through netbird ssh proxy for netbird-like host', async () => {
@@ -203,6 +234,9 @@ describe('ssh proxy command', () => {
       const notes = ws.messages.filter(m => m.action === 'ssh-proxy-command-message')
       assert.equal(notes.length, 1)
       assert.ok(notes[0].url.includes('example.netbird.io'))
+      assert.deepEqual(invocations.map(call => call.args.slice(0, 2)), [
+        ['ssh', 'detect'], ['ssh', 'proxy']
+      ])
     } finally {
       term && term.kill()
     }
@@ -220,6 +254,7 @@ describe('ssh proxy command', () => {
       'process.exit(1)\n',
       { mode: 0o755 }
     )
+    executables.set(stub, stub)
     process.env.ELECTERM_NETBIRD_BIN = stub
     const mod = require('../../../src/app/server/ssh-proxy-command')
     mod.clearDetectCache()
@@ -229,12 +264,14 @@ describe('ssh proxy command', () => {
       {}
     )
     assert.equal(r, null)
+    assert.deepEqual(invocations.map(call => call.args.slice(0, 2)), [['ssh', 'detect']])
   })
 
   test('non-netbird host skips detection entirely', async () => {
     // stub fails on every invocation; a null result proves it was never called
     const stub = path.join(tmpDir, 'netbird-fail-all')
     fs.writeFileSync(stub, '#!/usr/bin/env node\nprocess.exit(1)\n', { mode: 0o755 })
+    executables.set(stub, stub)
     process.env.ELECTERM_NETBIRD_BIN = stub
     const mod = require('../../../src/app/server/ssh-proxy-command')
     mod.clearDetectCache()
@@ -244,6 +281,7 @@ describe('ssh proxy command', () => {
       {}
     )
     assert.equal(r, null)
+    assert.equal(invocations.length, 0)
   })
 
   test('explicit proxyCommand option connects through it', async () => {
@@ -257,7 +295,7 @@ describe('ssh proxy command', () => {
         password: PASSWORD,
         useSshAgent: false,
         enableSsh: false,
-        proxyCommand: `${netbirdPath} ssh proxy 127.0.0.1 ${server.port}`,
+        proxyCommand: `"${process.execPath}" "${netbirdPath}" ssh proxy 127.0.0.1 ${server.port}`,
         readyTimeout: 10000
       }, ws)
       assert.ok(term)
@@ -265,6 +303,31 @@ describe('ssh proxy command', () => {
       assert.equal(notes.length, 1)
     } finally {
       term && term.kill()
+    }
+  })
+
+  test('a missing proxy executable rejects promptly without leaking a listener', async () => {
+    const mod = require('../../../src/app/server/ssh-proxy-command')
+    await assert.rejects(
+      mod.maybeProxyCommand({
+        host: '127.0.0.1',
+        proxyCommand: `"${path.join(tmpDir, 'missing-proxy.exe')}"`
+      }, {}, {}),
+      /proxy command failed to start:.*ENOENT/
+    )
+  })
+
+  test('an immediately exiting proxy closes the bridge', async () => {
+    const mod = require('../../../src/app/server/ssh-proxy-command')
+    const result = await mod.maybeProxyCommand({
+      host: '127.0.0.1',
+      proxyCommand: `"${process.execPath}" -e "process.exit(2)"`
+    }, {}, {})
+    try {
+      if (!result.socket.destroyed) await once(result.socket, 'close')
+      assert.equal(result.socket.destroyed, true)
+    } finally {
+      result.dispose()
     }
   })
 })

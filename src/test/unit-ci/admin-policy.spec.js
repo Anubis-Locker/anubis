@@ -33,10 +33,11 @@ describe('admin-policy (main process)', () => {
     assert.equal(res.baseURLAI, brand.ai.baseURL)
   })
 
-  it('error report url points to api subdomain and is off by default', () => {
+  it('error report url points to api subdomain and is on by default', () => {
     const { values } = policy.getAdminPolicy({})
-    assert.equal(values.errorReportUrl, `${brand.domains.api}/api/errors`)
-    assert.equal(values.errorReportEnabled, false)
+    assert.equal(values.errorReportUrl, `${brand.domains.api}/api/report`)
+    assert.equal(values.errorReportEnabled, true)
+    assert.equal(policy.getAdminPolicy({ ANUBIS_ADMIN_ERROR_REPORT: '0' }).values.errorReportEnabled, false)
   })
 
   it('env overrides are applied', () => {

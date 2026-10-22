@@ -10,6 +10,9 @@ permissions:
 jobs:
   build:
     runs-on: windows-2022
+    env:
+      NPM_REGISTRY_URL: https://npm.anubis.locker/
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
     steps:
     - uses: actions/checkout@v4
     - uses: actions/setup-node@v4
@@ -17,15 +20,12 @@ jobs:
         node-version: 24.x
     - uses: actions/setup-python@v5
       with:
-        python-version: '3.7'
+        python-version: '3.11'
         architecture: 'x64'
     - run: npm config set legacy-peer-deps true
     - run: npm install -g node-gyp
     - run: npm install -g yarn
-    - run: npm un node-pty serialport
-    - run: npm i
-    - run: npm i -S -E node-pty@1.1.0-beta14
-    - run: npm i -S -E serialport@13.0.0
+    - run: npm ci --legacy-peer-deps
     - run: npm run b
     - run: npm run pb
 
@@ -38,6 +38,9 @@ jobs:
         export ANUBIS_UPDATE_URL="$(node -p "require('./src/common/brand.config').domains.update")"
         export CSC_IDENTITY_AUTO_DISCOVERY=false
         node src/build/bin/build-win-portable
+
+    - name: Verify packaged desktop functionality
+      run: npm run test-packaged-windows
 
     - uses: actions/upload-artifact@v4
       with:

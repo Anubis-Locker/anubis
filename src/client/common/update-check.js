@@ -79,10 +79,15 @@ export async function getLatestReleaseInfo () {
   if (!res || !res.release) {
     return undefined
   }
-  const asset = (res.release.assets || []).find(r => r.name.includes(installSrc))
+  const asset = (res.release.assets || []).find(r =>
+    typeof r.name === 'string' && r.name.endsWith(installSrc)
+  )
+  if (!asset) {
+    throw new Error('No compatible update asset found')
+  }
   return {
     body: res.release.body,
     date: dayjs(res.release.published_at).format('YYYY-MM-DD'),
-    browserDownloadUrl: asset ? asset.browser_download_url : ''
+    browserDownloadUrl: asset.browser_download_url
   }
 }

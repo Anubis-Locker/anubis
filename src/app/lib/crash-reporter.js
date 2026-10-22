@@ -79,6 +79,9 @@ const reportProcessGone = (label, details = {}) => {
     `${name ? ` name=${name}` : ''}`,
     details
   )
+  sendErrorReport(new Error(
+    `${label} gone: type=${type || '-'} reason=${reason || '-'} exitCode=${describeExitCode(exitCode)}`
+  ))
   if (type === 'GPU' || GPU_EXIT_CODES.has(exitCode)) {
     console.error(GPU_ERROR_SUGGESTION)
   }
@@ -146,26 +149,51 @@ function setupCommandLineSwitches () {
   }
 }
 
-// admin policy (errorReportEnabled / errorReportUrl): off unless the admin
-// enables it; only the error text, app version and platform are sent
-function sendErrorReport (error) {
+async function sendReport (type, fields = {}) {
   try {
     const { values } = getAdminPolicy()
     if (!values.errorReportEnabled || typeof fetch !== 'function') {
       return
     }
-    fetch(values.errorReportUrl, {
+    const { getInstallId } = require('../common/install-id')
+    const response = await fetch(values.errorReportUrl, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
+      signal: AbortSignal.timeout(5000),
       body: JSON.stringify({
-        app: require('../common/brand').id,
+        installId: getInstallId(),
+        type,
+        app: `${require('../common/brand').id}-desktop`,
         version: app.getVersion(),
         platform: process.platform,
-        message: String(error?.message || error).slice(0, 2000),
-        stack: String(error?.stack || '').slice(0, 8000)
+        arch: process.arch,
+        ...fields
       })
-    }).catch(() => {})
-  } catch (e) {}
+    })
+    if (!response.ok) {
+      throw new Error(`Management API rejected ${type} report: HTTP ${response.status}`)
+    }
+    const result = await response.json()
+    if (result?.ok !== true || typeof result.id !== 'string') {
+      throw new Error('Management API returned an invalid report acknowledgment')
+    }
+    return result
+  } catch (e) {
+    log.warn('Management report failed:', e.message)
+  }
+}
+
+function sendErrorReport (error) {
+  return sendReport('error', {
+    message: String(error?.message || error).slice(0, 2000),
+    stack: String(error?.stack || '').slice(0, 8000)
+  })
+}
+
+// Sent once per app start (not an error): lets the management API list every
+// installation that is actually running, not just the ones that crashed.
+function sendInstallHeartbeat () {
+  return sendReport('heartbeat')
 }
 
 function setupCrashReporter () {
@@ -186,6 +214,7 @@ function setupCrashReporter () {
 
   // Handle uncaught exceptions
   process.on('uncaughtException', (error) => {
+    log.error('Uncaught application exception:', error)
     sendErrorReport(error)
     const errorMsg = error?.message || ''
     // Check if it's GPU related
@@ -199,6 +228,8 @@ function setupCrashReporter () {
       console.error(GPU_ERROR_SUGGESTION)
     }
   })
+
+  sendInstallHeartbeat()
 }
 
 module.exports = {
@@ -207,5 +238,7 @@ module.exports = {
   reportProcessGone,
   describeExitCode,
   GPU_EXIT_CODES,
-  GPU_ERROR_SUGGESTION
+  GPU_ERROR_SUGGESTION,
+  sendErrorReport,
+  sendInstallHeartbeat
 }

@@ -2,7 +2,7 @@
 
 Terminal / SSH / SFTP / FTP / Telnet / serial / RDP / VNC / Spice client for Windows, macOS and Linux.
 
-Homepage: https://anubis.locker (placeholder domain) · Command line: `anubis` · URL scheme: `anubis://`
+Homepage: https://anubis.locker · Command line: `anubis` · URL scheme: `anubis://`
 
 > Anubis-Security-Tool is a fork of [electerm](https://github.com/electerm/electerm) (MIT). See `LICENSE` for the original copyright notice.
 
@@ -50,9 +50,12 @@ User data lives in the `anubis` folder under the OS app data directory
 (Windows `%APPDATA%\anubis`, macOS `~/Library/Application Support/anubis`, Linux `~/.config/anubis`).
 Override with `DATA_PATH=/custom/path`.
 
-On first start, if that folder is empty and a legacy `electerm` folder exists in the same
+On first start, if that folder has no application data and a legacy `electerm` folder exists in the same
 location, it is **copied** (never moved or deleted). The list of legacy folder names is the
 `data.legacyDataDirs` setting in `src/common/brand.config.js` (set `[]` to disable).
+Chromium startup locks, caches and crash logs do not suppress migration. Existing
+application data and unrelated files prevent it; a copy failure stops startup
+instead of opening a new, empty database.
 Encrypted values (for example the storage key) are bound to the OS keychain; if they cannot be
 decrypted after migration, re-enter the affected passwords.
 
@@ -141,12 +144,48 @@ npm run pb   # copies electron-builder.json and resolves the @brand-res path
 # check dist/ folder
 ```
 
+Windows packaging runs `src/build/bin/after-pack.js` to place the architecture-matched
+ConPTY DLL and console host next to the rebuilt `node-pty` module. Missing runtime
+binaries fail the build. A successful build alone does not verify application
+functionality: test the packaged executable, including terminal input/output.
+
+After installing development dependencies, run the Windows packaged smoke test
+from the repository root:
+
+```powershell
+npm run test-packaged-windows
+# Optional: exercise the configured hosted AI service too
+$env:ANUBIS_SMOKE_AI = "1"
+# Optional: use a dedicated, short-lived test account for hosted sync
+$env:ANUBIS_SMOKE_SYNC_TOKEN = "<test-account JWT>"
+# To check an installed executable instead of dist\win-unpacked:
+$env:ANUBIS_SMOKE_EXE = "C:\path\to\anubis.exe"
+```
+
+The smoke test uses temporary data and checks terminal input/output, local files,
+encrypted bookmark persistence, loopback SSH/SFTP, authenticated MCP initialization,
+VNC framebuffer and keyboard/pointer delivery, and legacy-data migration on a real
+first portable startup. The hosted-sync check verifies encrypted upload/download
+and automatic upload after a bookmark changes.
+It temporarily trusts its loopback SSH fixture and removes only that fixture's
+entry from `known_hosts` during cleanup. Autostart and error/installation reporting
+are disabled in the test profile to avoid system changes or test-install records.
+Hosted tests require explicit credentials; they never use an existing user's sync
+account. `ANUBIS_SMOKE_RDP` and `ANUBIS_SMOKE_TUNNELS` enable the controlled VPS
+acceptance fixture, which verifies real RDP pixels/input and an authenticated
+reverse SSH tunnel; its RDP/VNC listeners bind loopback only. These checks are
+not run by public CI and do not enable public access to the workstation.
+Update unit tests exercise real HTTP streams and mock only installer
+launch, so they do not establish successful installation between versions.
+Windows release workflows run it before uploading artifacts and use the checked-in
+dependency lock rather than replacing native-module versions during the build.
+
 ## Build status
 
 | Platform | Status |
 |---|---|
 | Linux (deb/rpm/AppImage/tar.gz) | ✅ built and published |
-| Windows (NSIS) | ✅ built and published (rebuild pending after latest theme/icon update) |
+| Windows (NSIS) | Runtime repairs installed and checked: terminal, files, SSH/SFTP, MCP, AI, VNC/RDP display and input, encrypted hosted sync, reverse SSH tunnel and first-run migration. Installation between update versions remains unverified |
 | macOS (dmg) | ⏳ not yet built — requires macOS/CI runner |
 
 ## License

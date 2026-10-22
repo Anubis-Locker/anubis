@@ -3,7 +3,9 @@
  */
 
 const fs = require('fs')
-const { resolve } = require('path')
+const { resolve, basename, win32 } = require('path')
+const { Transform } = require('stream')
+const { pipeline } = require('stream/promises')
 const _ = require('../lib/lodash.js')
 const rp = require('axios')
 const { tempDir } = require('../common/runtime-constants')
@@ -33,11 +35,12 @@ function getUrl (url, mirror) {
 }
 
 function getReleaseInfo (
-  filter, releaseInfoUrl, agent
+  filter, releaseInfoUrl, agent, signal
 ) {
   const conf = {
     url: releaseInfoUrl,
-    timeout: 15000
+    timeout: 15000,
+    signal
   }
   if (agent) {
     conf.httpAgent = agent
@@ -55,122 +58,116 @@ function getReleaseInfo (
 class Upgrade {
   constructor (options) {
     this.options = options
+    this.id = options.id
+    this.ws = options.ws
+    this.controller = new AbortController()
+    this.pausing = false
   }
 
   async init () {
-    const {
-      id,
-      ws,
-      proxy,
-      mirror
-    } = this.options
-    const agent = createProxyAgent(proxy)
-    const releaseInfoUrl = `${brand.update.baseUrls[0]}${brand.update.releaseJson}?_=${+new Date()}`
-    const filter = r => {
-      return r.name.endsWith(installSrc)
-    }
-    // if (isWin) {
-    //   filter = r => /electerm-\d+\.\d+\.\d+-win-x64\.tar\.gz/.test(r.name)
-    // } else if (isArm) {
-    //   filter = r => {
-    //     return /arm64\.dmg$/.test(r.name)
-    //   }
-    // } else if (isMac) {
-    //   filter = r => {
-    //     return /mac\.dmg$/.test(r.name)
-    //   }
-    // }
-    const releaseInfo = await getReleaseInfo(filter, releaseInfoUrl, agent)
-      .catch(this.onError)
-    if (!releaseInfo) {
-      return
-    }
-    const localPath = resolve(tempDir, releaseInfo.name)
-    const remotePath = getUrl(releaseInfo.browser_download_url, mirror)
-    await rmrf(localPath).catch(log.error)
-    const { size } = releaseInfo
-    this.id = id
-    this.localPath = localPath
-    const readSteam = await rp({
-      url: remotePath,
-      httpAgent: agent,
-      httpsAgent: agent,
-      responseType: 'stream'
-    })
-      .then(r => r.data)
-      .catch(err => {
-        this.onError(err, id, ws)
-      })
-    if (!readSteam) {
-      return
-    }
-    const writeSteam = fs.createWriteStream(localPath)
-
-    let count = 0
-
-    this.pausing = false
-
-    this.onData = _.throttle((count) => {
+    try {
       if (this.onDestroy) {
         return
       }
-
-      ws.s({
-        id: 'upgrade:data:' + id,
-        data: Math.floor(count * 100 / size)
-      })
-    }, 1000)
-
-    readSteam.on('data', chunk => {
-      const res = writeSteam.write(chunk)
-      if (res) {
-        count += chunk.length
-        this.onData(count)
-      } else {
-        readSteam.pause()
-        writeSteam.once('drain', () => {
-          count += chunk.length
-          this.onData(count)
-          if (!this.pausing) {
-            readSteam.resume()
-          }
-        })
+      const { proxy, mirror } = this.options
+      const agent = createProxyAgent(proxy)
+      const { signal } = this.controller
+      const releaseInfoUrl = `${brand.update.baseUrls[0]}${brand.update.releaseJson}?_=${+new Date()}`
+      const filter = r => typeof r.name === 'string' && r.name.endsWith(installSrc)
+      const releaseInfo = await getReleaseInfo(filter, releaseInfoUrl, agent, signal)
+      if (!releaseInfo) {
+        throw new Error('No compatible update asset found')
       }
-    })
-
-    readSteam.on('close', () => {
-      writeSteam.end('', () => this.onEnd(id, ws))
-    })
-
-    readSteam.on('error', (err) => this.onError(err, id, ws))
-
-    this.readSteam = readSteam
-    this.writeSteam = writeSteam
-    this.ws = ws
-    this.destroy = this.destroy.bind(this)
+      const { name, size, browser_download_url: url } = releaseInfo
+      if (basename(name) !== name || win32.basename(name) !== name ||
+          /[<>:"/\\|?*]/.test(name) || /[. ]$/.test(name) ||
+          Array.from(name).some(char => char.charCodeAt(0) < 32)) {
+        throw new Error('Invalid update asset filename')
+      }
+      if (!Number.isSafeInteger(size) || size <= 0) {
+        throw new Error('Invalid update asset size')
+      }
+      const remotePath = getUrl(url, mirror)
+      const parsedUrl = new URL(remotePath)
+      if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+        throw new Error('Invalid update asset URL')
+      }
+      this.dir = await fs.promises.mkdtemp(resolve(tempDir, 'anubis-upgrade-'))
+      this.localPath = resolve(this.dir, name)
+      const response = await rp({
+        url: remotePath,
+        httpAgent: agent,
+        httpsAgent: agent,
+        responseType: 'stream',
+        timeout: 15000,
+        signal
+      })
+      this.readSteam = response.data
+      this.writeSteam = fs.createWriteStream(this.localPath, { flags: 'wx' })
+      let count = 0
+      this.onData = _.throttle(() => {
+        if (!this.onDestroy) {
+          this.ws.s({
+            id: 'upgrade:data:' + this.id,
+            data: Math.min(99, Math.floor(count * 100 / size))
+          })
+        }
+      }, 1000, { trailing: false })
+      const meter = new Transform({
+        transform: (chunk, encoding, callback) => {
+          count += chunk.length
+          if (count > size) {
+            callback(new Error('Update download exceeds expected size'))
+            return
+          }
+          this.onData()
+          if (this.pausing) {
+            this.continueDownload = () => callback(null, chunk)
+          } else {
+            callback(null, chunk)
+          }
+        }
+      })
+      await pipeline(this.readSteam, meter, this.writeSteam, { signal })
+      if (count !== size || (await fs.promises.stat(this.localPath)).size !== size) {
+        throw new Error('Update download size mismatch')
+      }
+      await this.onEnd()
+    } catch (err) {
+      if (!this.onDestroy) {
+        this.onError(err)
+      }
+    } finally {
+      this.continueDownload = null
+      globalState.removeUpgradeInst(this.id)
+      if (this.dir && !this.launched) {
+        await rmrf(this.dir).catch(log.error)
+      }
+    }
   }
 
-  onEnd (id, ws) {
+  async onEnd () {
     if (!this.onDestroy) {
-      // In test runs the download is only exercised for progress reporting;
-      // opening the installer (mounting a dmg, showing Finder) would steal
-      // GUI focus on CI runners and break every test that runs afterwards.
-      if (!process.env.NODE_TEST) {
-        openFile(this.localPath)
+      await openFile(this.localPath)
+      this.launched = true
+      if (this.onDestroy) {
+        return
+      }
+      if (process.send) {
         process.send({
           showFileInFolder: this.localPath
         })
       }
-      ws.s({
-        id: 'transfer:end:' + id,
+      this.ws.s({
+        id: 'upgrade:end:' + this.id,
         data: this.dir
       })
     }
   }
 
-  onError (err, id, ws) {
-    ws.s({
-      wid: 'upgrade:err:' + id,
+  onError (err) {
+    this.ws.s({
+      id: 'upgrade:err:' + this.id,
       error: {
         message: err.message,
         stack: err.stack
@@ -180,19 +177,23 @@ class Upgrade {
 
   pause () {
     this.pausing = true
-    this.readSteam.pause()
   }
 
   resume () {
     this.pausing = false
-    this.readSteam.resume()
+    const next = this.continueDownload
+    this.continueDownload = null
+    next && next()
   }
 
   destroy () {
+    if (this.onDestroy) {
+      return
+    }
     this.onDestroy = true
-    this.readSteam && this.readSteam.destroy()
-    this.ws && this.ws.close()
+    this.controller.abort()
     globalState.removeUpgradeInst(this.id)
+    this.ws.close()
   }
 
   // end

@@ -68,18 +68,22 @@ describe('x11 helpers', () => {
     assert.equal(r, false)
   })
 
-  test('probeXServer: true when an endpoint accepts', async () => {
-    const sockPath = path.join(
-      fs.mkdtempSync(path.join(os.tmpdir(), 'electerm-x11-')),
-      'X0'
-    )
+  test('probeXServer: true when an endpoint accepts', async t => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'anubis-x11-'))
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
+    const sockPath = process.platform === 'win32'
+      ? '\\\\.\\pipe\\' + path.basename(dir)
+      : path.join(dir, 'X0')
     const server = net.createServer()
-    await new Promise((resolve) => server.listen(sockPath, resolve))
+    await new Promise((resolve, reject) => {
+      server.once('error', reject)
+      server.listen(sockPath, resolve)
+    })
     try {
       const r = await probeXServer([{ path: sockPath }], 500)
       assert.equal(r, true)
     } finally {
-      server.close()
+      await new Promise(resolve => server.close(resolve))
     }
   })
 

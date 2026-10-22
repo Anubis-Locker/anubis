@@ -43,7 +43,7 @@ function runMainTests (getMod) {
     it('absolutises against the current working directory', () => {
       const { resolveVvFile } = getMod()
       assert.strictEqual(resolveVvFile('console.vv'), path.resolve('console.vv'))
-      assert.strictEqual(resolveVvFile('/a/b/console.vv'), '/a/b/console.vv')
+      assert.strictEqual(resolveVvFile('/a/b/console.vv'), path.resolve('/a/b/console.vv'))
     })
 
     it('returns null for anything that is not a .vv file', () => {
@@ -59,17 +59,17 @@ function runMainTests (getMod) {
       const { findVvFile } = getMod()
       assert.strictEqual(
         findVvFile(['/electron', '/app/app.js', '/a/console.vv']),
-        '/a/console.vv'
+        path.resolve('/a/console.vv')
       )
       // the packaged layout has no script path, so the file is argv[1]
       assert.strictEqual(
         findVvFile(['/Applications/electerm', '/a/console.vv']),
-        '/a/console.vv'
+        path.resolve('/a/console.vv')
       )
       // flags before or after do not matter
       assert.strictEqual(
         findVvFile(['/e', '/a/console.vv', '--disable-gpu', '--no-sandbox']),
-        '/a/console.vv'
+        path.resolve('/a/console.vv')
       )
     })
 
@@ -103,7 +103,7 @@ function runMainTests (getMod) {
       const { findVvFile } = getMod()
       assert.strictEqual(
         findVvFile(['/e', '/a/one.vv', '/b/two.vv']),
-        '/a/one.vv'
+        path.resolve('/a/one.vv')
       )
     })
   })

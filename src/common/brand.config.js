@@ -9,7 +9,6 @@
  * src/client/common/constants.js.
  *
  * Do not put secrets here: the whole object is shipped to the renderer.
- * NOTE: ".locker" is not an IANA TLD; change `domain` here when a real one is used.
  */
 
 const domain = 'anubis.locker'

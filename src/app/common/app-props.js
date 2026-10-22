@@ -37,20 +37,17 @@ function getDataPath () {
 
 const dataPath = getDataPath()
 // first start: copy legacy data (never deleted) before any db/key file is opened
-try {
-  const brandData = require('./brand').data
-  const res = require('../lib/migrate-legacy-data').migrateLegacyData({
-    appPath: dataPath.appPath,
-    dirName: brandData.dirName,
-    legacyDataDirs: brandData.legacyDataDirs
-  })
-  if (res.migrated) {
-    console.log(`migrated legacy data ${res.from} -> ${res.to}`)
-  } else if (res.error) {
-    console.error('legacy data migration failed:', res.error)
-  }
-} catch (e) {
-  console.error('legacy data migration failed:', e.message)
+const brandData = require('./brand').data
+const migration = require('../lib/migrate-legacy-data').migrateLegacyData({
+  appPath: dataPath.appPath,
+  dirName: brandData.dirName,
+  legacyDataDirs: brandData.legacyDataDirs
+})
+if (migration.error) {
+  throw new Error(`Legacy data migration failed (${migration.from}): ${migration.error}`)
+}
+if (migration.migrated) {
+  console.log(`migrated legacy data ${migration.from} -> ${migration.to}`)
 }
 
 module.exports = {

@@ -60,8 +60,8 @@ function getAdminPolicy (env = process.env) {
     authHeaderNameAI: 'Authorization: Bearer',
     checkUpdateOnStart: envBool(env.ANUBIS_ADMIN_UPDATE_ENABLED, brand.update.enabled),
     mcpServerEnabled: envBool(env.ANUBIS_ADMIN_MCP_ENABLED, true),
-    errorReportEnabled: envBool(env.ANUBIS_ADMIN_ERROR_REPORT, false),
-    errorReportUrl: envStr(env.ANUBIS_ADMIN_ERROR_REPORT_URL, `${apiBase()}/api/errors`),
+    errorReportEnabled: envBool(env.ANUBIS_ADMIN_ERROR_REPORT, true),
+    errorReportUrl: envStr(env.ANUBIS_ADMIN_ERROR_REPORT_URL, `${apiBase()}/api/report`),
     autoStartOnLogin: envBool(env.ANUBIS_ADMIN_AUTOSTART, true)
   }
   const locked = Object.keys(values)

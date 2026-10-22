@@ -14,7 +14,7 @@
 | main | `src\app\lib\user-config-controller.js` | `saveUserConfig`: значения из IPC/UI переписываются политикой до записи в БД; `adminLockedKeys` в БД не пишется |
 | main | `src\app\lib\admin-startup.js` (вызов в `create-app.js`) | На старте перезаписывает отклонившиеся значения в сохранённом конфиге, применяет автозапуск ОС и регистрацию deep link |
 | main | `src\app\widgets\widget-mcp-server.js` | Подставляет MCP-токен, пользователь его не может очистить/заменить |
-| main | `src\app\lib\crash-reporter.js` | Отправка отчётов об ошибках только если админ включил и только на `errorReportUrl` |
+| main | `src\app\lib\crash-reporter.js` | Отправка отчётов об ошибках и разового heartbeat при старте — включено по умолчанию, URL/вкл.-выкл. только через admin-policy |
 | renderer | `src\client\common\admin-policy.js` | `ADMIN_LOCKABLE_KEYS`, `isAdminLocked(key, config)` — для форм |
 | renderer | `setting-common.jsx`, `ai-config.jsx`, `ai-presets.js`, `setting-sync-form.jsx` | Скрытие/блокировка полей («управляется администратором») |
 
@@ -28,10 +28,12 @@
 | `enableGlobalProxy`, `proxy` | не заданы (не блокируются) | `ANUBIS_ADMIN_PROXY=socks5://host:port` — тогда включаются и блокируются | блок Global proxy скрыт |
 | `checkUpdateOnStart` | `brand.update.enabled` (true); серверы — `brand.update.baseUrls` (build-time) | `brand.config.js` → `update` или `ANUBIS_ADMIN_UPDATE_ENABLED=0/1` | переключатель скрыт |
 | `mcpServerEnabled` (+ MCP-токен) | true; токен случайный, `userData\admin-mcp-token` | `ANUBIS_ADMIN_MCP_ENABLED=0/1`; токен — удалить файл для перевыпуска | токен в UI не показывается |
-| `errorReportEnabled`, `errorReportUrl` | false; `https://api.anubis.locker/api/errors` (`brand.domains.api`) | `ANUBIS_ADMIN_ERROR_REPORT=1`, `ANUBIS_ADMIN_ERROR_REPORT_URL` | в UI нет |
+| `errorReportEnabled`, `errorReportUrl` | true; `https://api.anubis.locker/api/report` (`brand.domains.api`) | `ANUBIS_ADMIN_ERROR_REPORT=0/1`, `ANUBIS_ADMIN_ERROR_REPORT_URL` | в UI нет |
 | `autoStartOnLogin` | true (только упакованное приложение) | `ANUBIS_ADMIN_AUTOSTART=0/1`; `ANUBIS_ADMIN_AUTOSTART_USER_CAN_DISABLE=1` снимает блокировку — тогда переключатель в Settings доступен | скрыт, если заблокирован |
 
-Отправляются при ошибке только: текст/стек, версия, платформа. По умолчанию отправка выключена (политика приватности: `brand.update.sendTelemetry=false`).
+Отправляются: при ошибке — текст/стек (до 8 КБ), версия, платформа, арх; при старте приложения — только разовый "heartbeat" (без текста/стека), чтобы `api.anubis.locker` мог показать список установленных экземпляров (`/api/installs`). Оба типа событий включают случайный `installId`, который хранится в userData (`install-id`, ничего не говорит о пользователе) — это не телеметрия использования, `brand.update.sendTelemetry` остаётся `false` (отправляется только версия при проверке обновлений).
+
+Отчёты об аварийном завершении дочернего процесса/рендерера также отправляются серверу. Ошибки сохранения `installId`, недоступность API и некорректное подтверждение приёма записываются в локальный журнал; запрос ограничен пятью секундами. Идентификатор установки связывает её отчёты между запусками, но не содержит имени пользователя.
 
 ## Ограничения
 - Переменные окружения читает процесс приложения; для защиты от пользователя задавайте их на уровне системы/установщика, а значения по умолчанию фиксируйте в `brand.config.js` при сборке.

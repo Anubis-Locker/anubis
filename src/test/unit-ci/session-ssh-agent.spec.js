@@ -29,11 +29,10 @@ process.env.NODE_ENV = 'development'
 const { describe, test, beforeEach, afterEach } = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
-const os = require('node:os')
 const path = require('node:path')
 const { once } = require('node:events')
-const { spawnSync } = require('node:child_process')
 const { Server, utils } = require('@ai-security-tool/ssh2')
+const { makeFixtureDir, generateKey, startAgent } = require('./ssh-fixtures')
 const { session, test: sshTest } = require('../../../src/app/server/session-ssh')
 
 // ─── constants ────────────────────────────────────────────────────────────────
@@ -59,62 +58,6 @@ function publicKeyMatchesCtx (ctx, publicKeyPem) {
     parseKey(publicKeyPem).getPublicSSH(),
     ctx.key.data
   ) === 0
-}
-
-function runCommand (command, args, options = {}) {
-  const result = spawnSync(command, args, { encoding: 'utf8', ...options })
-  if (result.error) throw result.error
-  if (result.status !== 0) {
-    throw new Error(
-      `${command} ${args.join(' ')} exited ${result.status}: ${result.stderr || result.stdout}`
-    )
-  }
-  return result.stdout
-}
-
-function generateKey ({ dir, name, type = 'ed25519', passphrase = '', bits }) {
-  const keyPath = path.join(dir, name)
-  const args = ['-q', '-t', type]
-  if (bits) args.push('-b', String(bits))
-  args.push('-N', passphrase, '-f', keyPath, '-C', `electerm-${name}`)
-  runCommand('ssh-keygen', args)
-  return {
-    keyPath,
-    privateKey: fs.readFileSync(keyPath, 'utf8'),
-    publicKey: fs.readFileSync(`${keyPath}.pub`, 'utf8')
-  }
-}
-
-/**
- * Start ssh-agent on a unique socket and load the given key into it.
- * Returns { env, kill }.
- */
-function startAgent (keyPath) {
-  // Use a socket path that is predictable enough for debugging but unique.
-  const socketPath = path.join(
-    os.tmpdir(),
-    `ea-agent-${process.pid}-${Date.now()}.sock`
-  )
-  const output = runCommand('ssh-agent', ['-a', socketPath, '-s'])
-  const sockMatch = output.match(/SSH_AUTH_SOCK=([^;]+)/)
-  const pidMatch = output.match(/SSH_AGENT_PID=([^;]+)/)
-  if (!sockMatch || !pidMatch) {
-    throw new Error(`Cannot parse ssh-agent output:\n${output}`)
-  }
-  const env = {
-    ...process.env,
-    SSH_AUTH_SOCK: sockMatch[1],
-    SSH_AGENT_PID: pidMatch[1]
-  }
-  if (keyPath) {
-    runCommand('ssh-add', [keyPath], { env })
-  }
-  return {
-    env,
-    kill () {
-      try { runCommand('ssh-agent', ['-k'], { env }) } catch (_) { /* ignore */ }
-    }
-  }
 }
 
 /**
@@ -143,7 +86,9 @@ async function startServer (allowedPublicKey, { debug = false } = {}) {
         publicKeyMatchesCtx(ctx, allowedPublicKey)
       ) {
         if (debug) console.log('[server] accepted publickey auth')
-        return ctx.accept()
+        return !ctx.signature || parseKey(allowedPublicKey).verify(ctx.blob, ctx.signature, ctx.hashAlgo) === true
+          ? ctx.accept()
+          : ctx.reject(['publickey'])
       }
       // reject but keep publickey in the advertised list so the client can
       // try the ssh agent after failing with a file key
@@ -226,12 +171,12 @@ function setEnv (name, value) {
 
 // ─── fixture management ────────────────────────────────────────────────────────
 
-describe('SSH agent auth', () => {
+describe('SSH agent auth', { timeout: 20000 }, () => {
   let tmpDir
   let savedEnv
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'electerm-agent-test-'))
+    tmpDir = makeFixtureDir('electerm-agent-test-')
 
     savedEnv = {
       HOME: process.env.HOME,
@@ -273,29 +218,20 @@ describe('SSH agent auth', () => {
       // and the connection would be rejected with "All configured
       // authentication methods failed" before the agent was ever tried.
 
-      let agent
-      try {
-        agent = startAgent() // start without a key first – we load it below
-      } catch (err) {
-        if (err.code === 'ENOENT') {
-          t.skip('ssh-agent / ssh-keygen not available')
-          return
-        }
-        throw err
-      }
+      const agent = await startAgent()
+      t.after(() => agent.kill())
 
       const sshKeysDir = process.env.sshKeysPath
 
       // Generate the key the server will accept and load it into the agent.
       const agentKey = generateKey({ dir: tmpDir, name: 'agent-key' })
-      runCommand('ssh-add', [agentKey.keyPath], { env: agent.env })
+      agent.addKey(agentKey.keyPath)
 
       // Generate a DIFFERENT key that lives in sshKeysPath.
       // The code will try this one first (publickey auth) and it will fail.
       // Agent must then be tried automatically.
       const wrongKey = generateKey({ dir: sshKeysDir, name: 'wrong-key' })
-      // Also place the matching .pub file so getSSHKeys() finds it.
-      fs.copyFileSync(`${wrongKey.keyPath}.pub`, path.join(sshKeysDir, 'wrong-key.pub'))
+      assert.ok(fs.existsSync(`${wrongKey.keyPath}.pub`))
 
       setEnv('SSH_AUTH_SOCK', agent.env.SSH_AUTH_SOCK)
       setEnv('SSH_AGENT_PID', agent.env.SSH_AGENT_PID)
@@ -316,10 +252,10 @@ describe('SSH agent auth', () => {
 
         // If we reach here the agent key was accepted.
         assert.ok(term, 'session should resolve when agent auth succeeds')
+        assert.ok(agent.state.signatures > 0, 'the agent must sign the authentication request')
       } finally {
         term?.kill()
         await server.close()
-        agent.kill()
       }
     }
   )
@@ -332,19 +268,11 @@ describe('SSH agent auth', () => {
       // initOptions.sshAgent is not set.  This covers the typical desktop
       // user who relies on a system-managed agent socket.
 
-      let agent
-      try {
-        agent = startAgent()
-      } catch (err) {
-        if (err.code === 'ENOENT') {
-          t.skip('ssh-agent / ssh-keygen not available')
-          return
-        }
-        throw err
-      }
+      const agent = await startAgent()
+      t.after(() => agent.kill())
 
       const agentKey = generateKey({ dir: tmpDir, name: 'implicit-agent-key' })
-      runCommand('ssh-add', [agentKey.keyPath], { env: agent.env })
+      agent.addKey(agentKey.keyPath)
 
       // Expose the agent socket via the environment variable only – do NOT
       // set initOptions.sshAgent.
@@ -366,10 +294,10 @@ describe('SSH agent auth', () => {
         }, makeWs({ debug: true }))
 
         assert.ok(term, 'session should resolve when implicit agent is used')
+        assert.ok(agent.state.signatures > 0)
       } finally {
         term?.kill()
         await server.close()
-        agent.kill()
       }
     }
   )
@@ -384,19 +312,11 @@ describe('SSH agent auth', () => {
       // then awaits a reply.  With ws === undefined the await never resolved,
       // causing the probe to hang.  This test would time out under that bug.
 
-      let agent
-      try {
-        agent = startAgent()
-      } catch (err) {
-        if (err.code === 'ENOENT') {
-          t.skip('ssh-agent / ssh-keygen not available')
-          return
-        }
-        throw err
-      }
+      const agent = await startAgent()
+      t.after(() => agent.kill())
 
       const agentKey = generateKey({ dir: tmpDir, name: 'probe-agent-key' })
-      runCommand('ssh-add', [agentKey.keyPath], { env: agent.env })
+      agent.addKey(agentKey.keyPath)
 
       setEnv('SSH_AUTH_SOCK', agent.env.SSH_AUTH_SOCK)
       setEnv('SSH_AGENT_PID', agent.env.SSH_AGENT_PID)
@@ -414,9 +334,9 @@ describe('SSH agent auth', () => {
         }, makeWs({ debug: true })) // ws must be forwarded (fixed in a357c4a3)
 
         assert.equal(ok, true, 'sshTest should return true when agent auth succeeds')
+        assert.ok(agent.state.signatures > 0)
       } finally {
         await server.close()
-        agent.kill()
       }
     }
   )
@@ -429,19 +349,11 @@ describe('SSH agent auth', () => {
       // interfere with subsequent agent-based authentication.  A fresh HOME
       // dir is used so known_hosts starts empty.
 
-      let agent
-      try {
-        agent = startAgent()
-      } catch (err) {
-        if (err.code === 'ENOENT') {
-          t.skip('ssh-agent / ssh-keygen not available')
-          return
-        }
-        throw err
-      }
+      const agent = await startAgent()
+      t.after(() => agent.kill())
 
       const agentKey = generateKey({ dir: tmpDir, name: 'new-host-agent-key' })
-      runCommand('ssh-add', [agentKey.keyPath], { env: agent.env })
+      agent.addKey(agentKey.keyPath)
 
       setEnv('SSH_AUTH_SOCK', agent.env.SSH_AUTH_SOCK)
       setEnv('SSH_AGENT_PID', agent.env.SSH_AGENT_PID)
@@ -480,6 +392,7 @@ describe('SSH agent auth', () => {
         }, ws)
 
         assert.ok(term, 'session should resolve after trusting the host key')
+        assert.ok(agent.state.signatures > 0)
         assert.equal(
           confirmCount,
           1,
@@ -497,7 +410,6 @@ describe('SSH agent auth', () => {
       } finally {
         term?.kill()
         await server.close()
-        agent.kill()
       }
     }
   )

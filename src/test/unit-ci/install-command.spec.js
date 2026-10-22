@@ -19,9 +19,41 @@
 
 const { test, describe, after } = require('node:test')
 const assert = require('node:assert/strict')
-const fs = require('node:fs')
-const os = require('node:os')
-const path = require('node:path')
+const nativeFs = require('node:fs')
+const nativePath = require('node:path')
+const path = nativePath.posix
+const brand = require('../../app/common/brand')
+
+// Injected POSIX platforms need POSIX paths, including readlink results. A
+// drive-less absolute path still addresses the current drive on Windows.
+function posixPath (file) {
+  return process.platform === 'win32'
+    ? file.replace(/\\/g, '/').replace(/^[A-Za-z]:/, '')
+    : file
+}
+
+const chmodCalls = []
+const fs = {
+  ...nativeFs,
+  readlinkSync: file => posixPath(nativeFs.readlinkSync(file)),
+  chmodSync: (file, mode) => {
+    chmodCalls.push({ file, mode })
+    nativeFs.chmodSync(file, mode)
+  }
+}
+
+const {
+  getCommandStatus: commandStatus,
+  installCommand: install,
+  uninstallCommand: uninstall,
+  resolveBinDir: resolveDir,
+  ...commandHelpers
+} = require('../../app/lib/install-command')
+
+const getCommandStatus = options => commandStatus({ fs, ...options })
+const installCommand = options => install({ fs, ...options })
+const uninstallCommand = options => uninstall({ fs, ...options })
+const resolveBinDir = options => resolveDir({ fs, ...options })
 
 const {
   WRAPPER_MARKER,
@@ -30,21 +62,17 @@ const {
   getBinDirCandidates,
   isInPath,
   normalizePathEntry,
-  resolveBinDir,
   shQuote,
   getWrapperContent,
   parseWrapperTarget,
   readInstallInfo,
   isUpToDate,
-  getCommandStatus,
-  installCommand,
-  uninstallCommand,
   WIN_INSTALL_SCRIPT,
   WIN_UNINSTALL_SCRIPT
-} = require('../../app/lib/install-command')
+} = commandHelpers
 
-const ROOT = path.resolve(__dirname, '../../..')
-const base = fs.mkdtempSync(path.join(os.tmpdir(), 'electerm-install-cmd-'))
+const ROOT = nativePath.resolve(__dirname, '../../..')
+const base = posixPath(fs.mkdtempSync(nativePath.join(ROOT, '.install-command-test-')))
 
 after(() => {
   fs.rmSync(base, { recursive: true, force: true })
@@ -69,21 +97,20 @@ function fakeExecFile (responder) {
   return fn
 }
 
-const WIN_EXE =
-  'C:\\Users\\me\\AppData\\Local\\Programs\\electerm\\anubis.exe'
-const WIN_DIR = 'C:\\Users\\me\\AppData\\Local\\Programs\\electerm'
+const WIN_DIR = `C:\\Users\\me\\AppData\\Local\\Programs\\${brand.cliName}`
+const WIN_EXE = nativePath.win32.join(WIN_DIR, `${brand.cliName}.exe`)
 
-const MAC_APP = '/Applications/electerm.app/Contents/MacOS/electerm'
+const MAC_APP = `/Applications/${brand.cliName}.app/Contents/MacOS/${brand.cliName}`
 
 describe('install-command: which binary the command points at', () => {
   test('linux AppImage links the stable $APPIMAGE, not the temp mount', () => {
     assert.equal(
       getCommandTarget({
         platform: 'linux',
-        execPath: '/tmp/.mount_electerm123/electerm',
-        env: { APPIMAGE: '/home/me/Applications/electerm.AppImage' }
+        execPath: `/mount/.mount_${brand.cliName}123/${brand.cliName}`,
+        env: { APPIMAGE: `/home/me/Applications/${brand.cliName}.AppImage` }
       }),
-      '/home/me/Applications/electerm.AppImage'
+      `/home/me/Applications/${brand.cliName}.AppImage`
     )
   })
 
@@ -91,10 +118,10 @@ describe('install-command: which binary the command points at', () => {
     assert.equal(
       getCommandTarget({
         platform: 'linux',
-        execPath: '/opt/electerm/electerm',
+        execPath: `/opt/${brand.cliName}/${brand.cliName}`,
         env: {}
       }),
-      '/opt/electerm/electerm'
+      `/opt/${brand.cliName}/${brand.cliName}`
     )
   })
 
@@ -222,7 +249,7 @@ describe('install-command: macOS wrapper lifecycle', () => {
 
   test('writes an executable wrapper, not a symlink', async () => {
     const dir = tmpDir('bin-')
-    const execPath = path.join(base, 'electerm.app', 'Contents', 'MacOS', 'electerm')
+    const execPath = path.join(base, `${brand.cliName}.app`, 'Contents', 'MacOS', brand.cliName)
     const res = await installCommand(macOpts(dir, execPath))
 
     assert.equal(res.ok, true)
@@ -233,7 +260,10 @@ describe('install-command: macOS wrapper lifecycle', () => {
     const st = fs.lstatSync(res.linkPath)
     assert.equal(st.isSymbolicLink(), false, 'macOS must not install a symlink')
     assert.equal(st.isFile(), true)
-    assert.notEqual(st.mode & 0o111, 0, 'wrapper must be executable')
+    assert.deepEqual(chmodCalls.at(-1), {
+      file: res.linkPath + `.${brand.cliName}-tmp`,
+      mode: 0o755
+    }, 'wrapper must explicitly request executable permissions, even on Windows')
 
     const content = fs.readFileSync(res.linkPath, 'utf8')
     assert.ok(content.includes(WRAPPER_MARKER))
@@ -244,7 +274,7 @@ describe('install-command: macOS wrapper lifecycle', () => {
 
   test('is idempotent - a second install reports exists', async () => {
     const dir = tmpDir('bin-')
-    const execPath = path.join(base, 'electerm.app', 'Contents', 'MacOS', 'electerm')
+    const execPath = path.join(base, `${brand.cliName}.app`, 'Contents', 'MacOS', brand.cliName)
     await installCommand(macOpts(dir, execPath))
     const again = await installCommand(macOpts(dir, execPath))
     assert.equal(again.ok, true)
@@ -253,16 +283,16 @@ describe('install-command: macOS wrapper lifecycle', () => {
 
   test('leaves no temp file behind (atomic replace)', async () => {
     const dir = tmpDir('bin-')
-    const execPath = path.join(base, 'electerm.app', 'Contents', 'MacOS', 'electerm')
+    const execPath = path.join(base, `${brand.cliName}.app`, 'Contents', 'MacOS', brand.cliName)
     await installCommand(macOpts(dir, execPath))
     await installCommand(macOpts(dir, execPath))
-    assert.deepEqual(fs.readdirSync(dir), ['anubis'])
+    assert.deepEqual(fs.readdirSync(dir), [brand.cliName])
   })
 
   test('re-points a wrapper left behind by a moved app', async () => {
     const dir = tmpDir('bin-')
-    const oldExe = path.join(base, 'old.app', 'Contents', 'MacOS', 'electerm')
-    const newExe = path.join(base, 'new.app', 'Contents', 'MacOS', 'electerm')
+    const oldExe = path.join(base, 'old.app', 'Contents', 'MacOS', brand.cliName)
+    const newExe = path.join(base, 'new.app', 'Contents', 'MacOS', brand.cliName)
     await installCommand(macOpts(dir, oldExe))
     const res = await installCommand(macOpts(dir, newExe))
     assert.equal(res.action, 'updated')
@@ -271,7 +301,7 @@ describe('install-command: macOS wrapper lifecycle', () => {
 
   test('refuses to clobber a file it did not create', async () => {
     const dir = tmpDir('bin-')
-    const linkPath = path.join(dir, 'anubis')
+    const linkPath = path.join(dir, brand.cliName)
     fs.writeFileSync(linkPath, '#!/bin/sh\necho not ours\n')
     const res = await installCommand(macOpts(dir, MAC_APP))
     assert.equal(res.ok, false)
@@ -301,7 +331,7 @@ describe('install-command: macOS wrapper lifecycle', () => {
     await installCommand(opts)
     const first = await uninstallCommand(opts)
     assert.equal(first.removed, true)
-    assert.equal(fs.existsSync(path.join(dir, 'anubis')), false)
+    assert.equal(fs.existsSync(path.join(dir, brand.cliName)), false)
 
     const second = await uninstallCommand(opts)
     assert.equal(second.removed, false)
@@ -309,10 +339,10 @@ describe('install-command: macOS wrapper lifecycle', () => {
 
   test('never touches a symlink on macOS', async () => {
     // a symlink at this path is somebody else's file: installing a symlink is
-    // what used to break the app, so electerm must not create or adopt one
+    // what used to break the app, so the installer must not create or adopt one
     const dir = tmpDir('bin-')
-    const execPath = path.join(base, 'electerm.app', 'Contents', 'MacOS', 'electerm')
-    const linkPath = path.join(dir, 'anubis')
+    const execPath = path.join(base, `${brand.cliName}.app`, 'Contents', 'MacOS', brand.cliName)
+    const linkPath = path.join(dir, brand.cliName)
     fs.symlinkSync(execPath, linkPath)
 
     const res = await installCommand(macOpts(dir, execPath))
@@ -325,10 +355,10 @@ describe('install-command: macOS wrapper lifecycle', () => {
 
   test('uninstall leaves a foreign file alone', async () => {
     const dir = tmpDir('bin-')
-    fs.writeFileSync(path.join(dir, 'anubis'), 'x')
+    fs.writeFileSync(path.join(dir, brand.cliName), 'x')
     const res = await uninstallCommand(macOpts(dir, MAC_APP))
     assert.equal(res.removed, false)
-    assert.equal(fs.existsSync(path.join(dir, 'anubis')), true)
+    assert.equal(fs.existsSync(path.join(dir, brand.cliName)), true)
   })
 })
 
@@ -347,12 +377,12 @@ describe('install-command: macOS status', () => {
     assert.equal(st.installed, false)
     assert.equal(st.stale, false)
     assert.equal(st.shape, 'wrapper')
-    assert.equal(st.linkPath, path.join(dir, 'anubis'))
+    assert.equal(st.linkPath, path.join(dir, brand.cliName))
   })
 
   test('installed after install, stale after the app moves', async () => {
     const dir = tmpDir('bin-')
-    const execPath = path.join(base, 'electerm.app', 'Contents', 'MacOS', 'electerm')
+    const execPath = path.join(base, `${brand.cliName}.app`, 'Contents', 'MacOS', brand.cliName)
     await installCommand(opts(dir, execPath))
     const st = await getCommandStatus(opts(dir, execPath))
     assert.equal(st.installed, true)
@@ -366,8 +396,8 @@ describe('install-command: macOS status', () => {
 
   test('a symlink on macOS is blocked, not adopted', async () => {
     const dir = tmpDir('bin-')
-    const execPath = path.join(base, 'electerm.app', 'Contents', 'MacOS', 'electerm')
-    fs.symlinkSync(execPath, path.join(dir, 'anubis'))
+    const execPath = path.join(base, `${brand.cliName}.app`, 'Contents', 'MacOS', brand.cliName)
+    fs.symlinkSync(execPath, path.join(dir, brand.cliName))
     const st = await getCommandStatus(opts(dir, execPath))
     assert.equal(st.installed, false)
     assert.equal(st.stale, false)
@@ -376,7 +406,7 @@ describe('install-command: macOS status', () => {
 
   test('flags a foreign file as blocked', async () => {
     const dir = tmpDir('bin-')
-    fs.writeFileSync(path.join(dir, 'anubis'), 'x')
+    fs.writeFileSync(path.join(dir, brand.cliName), 'x')
     const st = await getCommandStatus(opts(dir, MAC_APP))
     assert.equal(st.installed, false)
     assert.equal(st.blocked, true)
@@ -395,7 +425,7 @@ describe('install-command: linux symlink lifecycle (unchanged)', () => {
 
   test('creates a symlink, not a wrapper', async () => {
     const dir = tmpDir('bin-')
-    const execPath = path.join(base, 'electerm')
+    const execPath = path.join(base, brand.cliName)
     fs.writeFileSync(execPath, '')
     const res = await installCommand(linOpts(dir, execPath))
     assert.equal(res.ok, true)
@@ -407,8 +437,8 @@ describe('install-command: linux symlink lifecycle (unchanged)', () => {
 
   test('is idempotent and re-points a stale symlink', async () => {
     const dir = tmpDir('bin-')
-    const oldExe = path.join(base, 'electerm-old')
-    const newExe = path.join(base, 'electerm-new')
+    const oldExe = path.join(base, `${brand.cliName}-old`)
+    const newExe = path.join(base, `${brand.cliName}-new`)
     fs.writeFileSync(oldExe, '')
     fs.writeFileSync(newExe, '')
     await installCommand(linOpts(dir, oldExe))
@@ -420,7 +450,7 @@ describe('install-command: linux symlink lifecycle (unchanged)', () => {
 
   test('status: installed, then stale after the target moves', async () => {
     const dir = tmpDir('bin-')
-    const execPath = path.join(base, 'electerm')
+    const execPath = path.join(base, brand.cliName)
     fs.writeFileSync(execPath, '')
     await installCommand(linOpts(dir, execPath))
     assert.equal((await getCommandStatus(linOpts(dir, execPath))).installed, true)
@@ -431,9 +461,9 @@ describe('install-command: linux symlink lifecycle (unchanged)', () => {
 
   test('refuses to clobber a real file', async () => {
     const dir = tmpDir('bin-')
-    const linkPath = path.join(dir, 'anubis')
+    const linkPath = path.join(dir, brand.cliName)
     fs.writeFileSync(linkPath, '#!/bin/sh\necho not ours\n')
-    const res = await installCommand(linOpts(dir, path.join(base, 'electerm')))
+    const res = await installCommand(linOpts(dir, path.join(base, brand.cliName)))
     assert.equal(res.ok, false)
     assert.equal(res.action, 'blocked')
     assert.equal(fs.readFileSync(linkPath, 'utf8'), '#!/bin/sh\necho not ours\n')
@@ -441,7 +471,7 @@ describe('install-command: linux symlink lifecycle (unchanged)', () => {
 
   test('uninstall removes the symlink, and is a no-op when absent', async () => {
     const dir = tmpDir('bin-')
-    const execPath = path.join(base, 'electerm')
+    const execPath = path.join(base, brand.cliName)
     fs.writeFileSync(execPath, '')
     await installCommand(linOpts(dir, execPath))
     assert.equal((await uninstallCommand(linOpts(dir, execPath))).removed, true)
@@ -473,7 +503,7 @@ describe('install-command: the unpackaged (dev) guard', () => {
 
   test('uninstall is refused and removes nothing', async () => {
     const dir = tmpDir('bin-')
-    const file = path.join(dir, 'anubis')
+    const file = path.join(dir, brand.cliName)
     fs.writeFileSync(file, getWrapperContent(MAC_APP), { mode: 0o755 })
     const res = await uninstallCommand(devOpts(dir))
     assert.equal(res.ok, false)
@@ -648,7 +678,7 @@ describe('install-command: windows user PATH', () => {
 describe('install-command: helpers', () => {
   test('readInstallInfo distinguishes absent / symlink / wrapper / foreign', () => {
     const dir = tmpDir('rl-')
-    const target = '/Applications/electerm.app/Contents/MacOS/electerm'
+    const target = MAC_APP
     const link = path.join(dir, 'link')
     const wrap = path.join(dir, 'wrap')
     const foreign = path.join(dir, 'foreign')
@@ -679,8 +709,8 @@ describe('install-command: helpers', () => {
 
   test('a symlink is only ever ours on a symlink-shape platform', () => {
     const dir = tmpDir('rl-')
-    const target = '/Applications/electerm.app/Contents/MacOS/electerm'
-    const link = path.join(dir, 'anubis')
+    const target = MAC_APP
+    const link = path.join(dir, brand.cliName)
     fs.symlinkSync(target, link)
 
     assert.equal(readInstallInfo(link, fs, 'symlink').isOurs, true)
@@ -688,7 +718,7 @@ describe('install-command: helpers', () => {
   })
 
   test('isUpToDate is shape-aware', () => {
-    const target = '/Applications/electerm.app/Contents/MacOS/electerm'
+    const target = MAC_APP
     const wrapperInfo = {
       exists: true,
       isSymlink: false,
@@ -794,8 +824,10 @@ describe('install-command: testability guard', () => {
     )
     assert.match(
       constants,
-      /installCommandHelpLink = 'https:\/\/github\.com\/electerm\/electerm\/wiki\/Install-electerm-command'/,
-      'the wiki URL is a contract - a typo here ships a 404'
+      /installCommandHelpLink = wikiLink\('installCommand'\)/,
+      'the feature must use the branded documentation link'
     )
+    assert.equal(brand.docs.pages.installCommand, 'Install-command')
+    assert.equal(new URL(brand.docs.wikiBase).origin, brand.domains.docs)
   })
 })

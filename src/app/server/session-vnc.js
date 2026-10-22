@@ -82,22 +82,20 @@ class TerminalVnc extends TerminalBase {
   }
 
   test = async () => {
+    const { host, port = 5900, readyTimeout = 10000 } = this.initOptions
+    const info = await this.hop()
     return new Promise((resolve, reject) => {
-      const {
-        host,
-        port
-      } = this.initOptions
-      return this.hop()
-        .then(info => {
-          net.createConnection({
-            port,
-            host,
-            ...info
-          }, () => {
-            resolve(true)
-          })
-        })
-        .catch(err => reject(err))
+      const socket = net.createConnection({ host, port, ...info })
+      this.channel = socket
+      socket.once('connect', () => {
+        socket.destroy()
+        resolve(true)
+      })
+      socket.once('error', reject)
+      socket.setTimeout(readyTimeout, () => {
+        socket.destroy()
+        reject(new Error('Connection timed out'))
+      })
     })
   }
 

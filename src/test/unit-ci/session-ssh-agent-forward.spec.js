@@ -28,11 +28,10 @@ process.env.NODE_ENV = 'development'
 const { describe, test, beforeEach, afterEach } = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
-const os = require('node:os')
 const path = require('node:path')
 const { once } = require('node:events')
-const { spawnSync } = require('node:child_process')
 const { Server, utils } = require('@ai-security-tool/ssh2')
+const { makeFixtureDir, generateKey, startAgent } = require('./ssh-fixtures')
 const { session } = require('../../../src/app/server/session-ssh')
 
 // ─── constants ────────────────────────────────────────────────────────────────
@@ -46,60 +45,8 @@ const HOST_KEY = utils.generateKeyPairSync('ed25519', {
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
-function runCommand (command, args, options = {}) {
-  const result = spawnSync(command, args, { encoding: 'utf8', ...options })
-  if (result.error) throw result.error
-  if (result.status !== 0) {
-    throw new Error(
-      `${command} ${args.join(' ')} exited ${result.status}: ${result.stderr || result.stdout}`
-    )
-  }
-  return result.stdout
-}
-
-function generateKey ({ dir, name, type = 'ed25519' }) {
-  const keyPath = path.join(dir, name)
-  runCommand('ssh-keygen', ['-q', '-t', type, '-N', '', '-f', keyPath, '-C', `electerm-${name}`])
-  return {
-    keyPath,
-    privateKey: fs.readFileSync(keyPath, 'utf8'),
-    publicKey: fs.readFileSync(`${keyPath}.pub`, 'utf8')
-  }
-}
-
 /**
- * Start ssh-agent on a unique socket and load the given key into it.
- * Returns { env, kill }.
- */
-function startAgent (keyPath) {
-  const socketPath = path.join(
-    os.tmpdir(),
-    `ea-fwd-agent-${process.pid}-${Date.now()}.sock`
-  )
-  const output = runCommand('ssh-agent', ['-a', socketPath, '-s'])
-  const sockMatch = output.match(/SSH_AUTH_SOCK=([^;]+)/)
-  const pidMatch = output.match(/SSH_AGENT_PID=([^;]+)/)
-  if (!sockMatch || !pidMatch) {
-    throw new Error(`Cannot parse ssh-agent output:\n${output}`)
-  }
-  const env = {
-    ...process.env,
-    SSH_AUTH_SOCK: sockMatch[1],
-    SSH_AGENT_PID: pidMatch[1]
-  }
-  if (keyPath) {
-    runCommand('ssh-add', [keyPath], { env })
-  }
-  return {
-    env,
-    kill () {
-      try { runCommand('ssh-agent', ['-k'], { env }) } catch (_) { /* ignore */ }
-    }
-  }
-}
-
-/**
- * Start a minimal SSH server that accepts any publickey auth for USERNAME and
+ * Start a minimal SSH server that verifies publickey auth for USERNAME and
  * records agent forwarding requests.
  *
  * With acceptAgentForward = false no `auth-agent` listener is registered,
@@ -109,7 +56,8 @@ function startAgent (keyPath) {
  *
  * Returns { port, state, close } where state counts what the server saw.
  */
-async function startServer ({ acceptAgentForward = false, debug = false } = {}) {
+async function startServer ({ acceptAgentForward = false, publicKey, debug = false } = {}) {
+  const allowedKey = utils.parseKey(publicKey)
   const clients = new Set()
   const state = {
     agentForwardRequests: 0,
@@ -128,7 +76,10 @@ async function startServer ({ acceptAgentForward = false, debug = false } = {}) 
         return ctx.reject(['publickey'])
       }
       if (ctx.method === 'publickey' && ctx.username === USERNAME) {
-        return ctx.accept()
+        if (!ctx.key.data.equals(allowedKey.getPublicSSH())) return ctx.reject(['publickey'])
+        return !ctx.signature || allowedKey.verify(ctx.blob, ctx.signature, ctx.hashAlgo) === true
+          ? ctx.accept()
+          : ctx.reject(['publickey'])
       }
       return ctx.reject(['publickey'])
     })
@@ -216,12 +167,12 @@ function setEnv (name, value) {
 
 // ─── fixture management ───────────────────────────────────────────────────────
 
-describe('SSH agent forwarding', () => {
+describe('SSH agent forwarding', { timeout: 20000 }, () => {
   let tmpDir
   let savedEnv
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'electerm-agent-fwd-test-'))
+    tmpDir = makeFixtureDir('electerm-agent-fwd-test-')
 
     savedEnv = {
       HOME: process.env.HOME,
@@ -256,21 +207,13 @@ describe('SSH agent forwarding', () => {
   test(
     'agentForward: true requests agent forwarding on the session channel',
     async (t) => {
-      let agent
-      try {
-        agent = startAgent()
-      } catch (err) {
-        if (err.code === 'ENOENT') {
-          t.skip('ssh-agent / ssh-keygen not available')
-          return
-        }
-        throw err
-      }
+      const agent = await startAgent()
+      t.after(() => agent.kill())
 
       const key = generateKey({ dir: tmpDir, name: 'fwd-key' })
-      runCommand('ssh-add', [key.keyPath], { env: agent.env })
+      agent.addKey(key.keyPath)
 
-      const server = await startServer({ acceptAgentForward: true })
+      const server = await startServer({ acceptAgentForward: true, publicKey: key.publicKey })
       let term
       try {
         term = await session({
@@ -284,6 +227,7 @@ describe('SSH agent forwarding', () => {
         }, makeWs())
 
         assert.ok(term, 'session should resolve')
+        assert.ok(agent.state.signatures > 0)
         assert.equal(
           server.state.agentForwardRequests,
           1,
@@ -293,7 +237,6 @@ describe('SSH agent forwarding', () => {
       } finally {
         term?.kill()
         await server.close()
-        agent.kill()
       }
     }
   )
@@ -302,21 +245,13 @@ describe('SSH agent forwarding', () => {
   test(
     'agent forwarding is not requested when the flag is off (default)',
     async (t) => {
-      let agent
-      try {
-        agent = startAgent()
-      } catch (err) {
-        if (err.code === 'ENOENT') {
-          t.skip('ssh-agent / ssh-keygen not available')
-          return
-        }
-        throw err
-      }
+      const agent = await startAgent()
+      t.after(() => agent.kill())
 
       const key = generateKey({ dir: tmpDir, name: 'fwd-key' })
-      runCommand('ssh-add', [key.keyPath], { env: agent.env })
+      agent.addKey(key.keyPath)
 
-      const server = await startServer({ acceptAgentForward: true })
+      const server = await startServer({ acceptAgentForward: true, publicKey: key.publicKey })
       let term
       try {
         term = await session({
@@ -329,6 +264,7 @@ describe('SSH agent forwarding', () => {
         }, makeWs())
 
         assert.ok(term, 'session should resolve')
+        assert.ok(agent.state.signatures > 0)
         assert.equal(
           server.state.agentForwardRequests,
           0,
@@ -337,7 +273,6 @@ describe('SSH agent forwarding', () => {
       } finally {
         term?.kill()
         await server.close()
-        agent.kill()
       }
     }
   )
@@ -350,7 +285,7 @@ describe('SSH agent forwarding', () => {
       // available, so session-ssh must drop the flag in that case.
       const key = generateKey({ dir: tmpDir, name: 'file-key' })
 
-      const server = await startServer({ acceptAgentForward: true })
+      const server = await startServer({ acceptAgentForward: true, publicKey: key.publicKey })
       let term
       try {
         term = await session({
@@ -380,23 +315,15 @@ describe('SSH agent forwarding', () => {
   test(
     'a server refusing agent forwarding still gets a working session',
     async (t) => {
-      let agent
-      try {
-        agent = startAgent()
-      } catch (err) {
-        if (err.code === 'ENOENT') {
-          t.skip('ssh-agent / ssh-keygen not available')
-          return
-        }
-        throw err
-      }
+      const agent = await startAgent()
+      t.after(() => agent.kill())
 
       const key = generateKey({ dir: tmpDir, name: 'fwd-key' })
-      runCommand('ssh-add', [key.keyPath], { env: agent.env })
+      agent.addKey(key.keyPath)
 
       // acceptAgentForward: false → the request is refused, exactly like an
       // OpenSSH server with AllowAgentForwarding no
-      const server = await startServer({ acceptAgentForward: false })
+      const server = await startServer({ acceptAgentForward: false, publicKey: key.publicKey })
       let term
       try {
         term = await session({
@@ -410,6 +337,7 @@ describe('SSH agent forwarding', () => {
         }, makeWs())
 
         assert.ok(term, 'session should resolve even when forwarding is refused')
+        assert.ok(agent.state.signatures > 0)
         assert.equal(server.state.agentForwardRequests, 0, 'request was refused')
         assert.equal(
           server.state.shells,
@@ -419,7 +347,6 @@ describe('SSH agent forwarding', () => {
       } finally {
         term?.kill()
         await server.close()
-        agent.kill()
       }
     }
   )

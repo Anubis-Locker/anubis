@@ -10,6 +10,7 @@
     "en-US"
   ],
   "asar": true,
+  "afterPack": "./src/build/bin/after-pack.js",
   "asarUnpack": [
     "node_modules/node-pty/build/Release/**"
   ],

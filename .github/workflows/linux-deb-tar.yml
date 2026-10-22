@@ -11,6 +11,9 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-24.04
+    env:
+      NPM_REGISTRY_URL: https://npm.anubis.locker/
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
     steps:
     - uses: actions/checkout@v4
     - uses: actions/setup-node@v4
@@ -18,7 +21,7 @@ jobs:
         node-version: 24.x
     - run: npm config set legacy-peer-deps true
     - run: npm install -g yarn
-    - run: npm i
+    - run: npm ci --legacy-peer-deps
     - run: npm run b
     - run: npm run pb
 

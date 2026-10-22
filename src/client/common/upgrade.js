@@ -16,48 +16,61 @@ class Upgrade {
   }) {
     const id = generate()
     this.id = id
-    const th = this
     const ws = await initWs('upgrade', id)
-    ws.s({
-      action: 'upgrade-new',
-      ...rest,
-      id
-    })
+    this.ws = ws
     keys.forEach(func => {
-      th[func] = (...args) => {
+      this[func] = (...args) => {
+        if (this.closed) {
+          return
+        }
         ws.s({
           action: 'upgrade-func',
-          id: th.id,
+          id,
           func,
           args
         })
         if (func === 'destroy') {
-          th.onDestroy(ws)
+          this.onDestroy()
         }
       }
     })
 
-    const did = 'upgrade:data:' + id
     this.onData = (evt) => {
+      if (this.closed) {
+        return
+      }
       const arg = JSON.parse(evt.data)
-      if (did === arg.id) {
+      if ('upgrade:data:' + id === arg.id) {
         onData(arg.data)
+      } else if ('upgrade:end:' + id === arg.id) {
+        this.onDestroy()
+        onEnd(arg)
+      } else if ('upgrade:err:' + id === arg.id) {
+        this.onDestroy()
+        onError(new Error(arg.error.message))
       }
     }
     ws.addEventListener('message', this.onData)
-    ws.once((arg) => {
-      onEnd(arg)
-    }, 'upgrade:end:' + id)
-    ws.once((arg) => {
-      console.debug('upgrade error')
-      console.debug(arg.error.stack)
-      onError(new Error(arg.error.message))
-    }, 'upgrade:err:' + id)
+    ws.onclose = () => {
+      if (!this.closed) {
+        this.onDestroy()
+        onError(new Error('Update connection closed before completion'))
+      }
+    }
+    ws.s({
+      ...rest,
+      action: 'upgrade-new',
+      id
+    })
   }
 
-  onDestroy (ws) {
-    ws.removeEventListener('message', this.onData)
-    ws.close()
+  onDestroy () {
+    if (this.closed) {
+      return
+    }
+    this.closed = true
+    this.ws.removeEventListener('message', this.onData)
+    this.ws.close()
   }
 }
 

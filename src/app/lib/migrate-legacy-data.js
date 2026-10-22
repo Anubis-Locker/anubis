@@ -8,11 +8,20 @@
 const fs = require('fs')
 const path = require('path')
 
-function hasData (dir) {
+const runtimeEntries = new Set([
+  'logs', 'Crashpad', 'Crash Reports', 'CrashpadMetrics-active.pma',
+  'lockfile', 'SingletonLock', 'SingletonCookie', 'SingletonSocket',
+  'DevToolsActivePort', 'blob_storage', 'Cache', 'Code Cache',
+  'DawnGraphiteCache', 'DawnWebGPUCache', 'GPUCache', 'GPUPersistentCache',
+  'GrShaderCache', 'ShaderCache'
+])
+
+function entries (dir) {
   try {
-    return fs.existsSync(dir) && fs.readdirSync(dir).length > 0
+    return fs.readdirSync(dir)
   } catch (e) {
-    return false
+    if (e.code === 'ENOENT') return []
+    throw e
   }
 }
 
@@ -36,12 +45,14 @@ function migrateLegacyData ({
     return { migrated: false }
   }
   const target = path.resolve(appPath, dirName)
-  if (hasData(target)) {
+  // Chromium may create locks, caches and crash logs before the app's entry.
+  // Those files do not mean that the user already has branded application data.
+  if (entries(target).some(name => !runtimeEntries.has(name))) {
     return { migrated: false }
   }
   for (const name of legacyDataDirs) {
     const from = path.resolve(appPath, name)
-    if (from === target || !hasData(from)) {
+    if (from === target || !entries(from).length) {
       continue
     }
     try {
