@@ -181,10 +181,11 @@ A separate isolated Windows check downloaded an actual NSIS package through the
 desktop update UI and completed a visible, interactive installation from QA
 version 5.6.10 to 5.6.11. The installed executable reported the new version, and
 the existing bookmark and encrypted password remained readable. Production
-updater code launched NSIS; the harness closed the old QA application and handled
-the installer's "cannot be closed" Retry dialog. Automatic shutdown and
-unattended installation remain unverified. This used a loopback feed and a
-separately named QA installation, not the public release feed.
+updater code launched NSIS and requested normal application shutdown, preserving
+the user's exit-confirmation setting. The check required no manual application
+closure, process kills or Retry clicks; the harness operated only the normal
+Next/Install/Finish installer controls. This used a loopback feed and a separately
+named QA installation, not the public release feed or unattended installation.
 Windows release workflows run the packaged smoke test before uploading artifacts
 and use the checked-in dependency lock rather than replacing native-module
 versions during the build.
@@ -228,6 +229,10 @@ the new `version.html`. Drafts and prereleases are ignored. Failed publication
 is logged and returns HTTP 500, not a successful acknowledgement. The legacy
 Go receiver can remain a reference module; the deployed Node receiver keeps
 backend recovery reproducible from this repository.
+Include `services\nginx-release-location.conf` inside the update subdomain's
+HTTPS server block, and configure the repository's Releases webhook to use the
+same path and HMAC secret. The proxy preserves the request body and signature;
+the normal static update/download routes are unchanged.
 
 Linux desktop sessions need a working D-Bus session and an unlocked Secret
 Service/keyring for OS-backed password encryption. The Ubuntu runtime check used
