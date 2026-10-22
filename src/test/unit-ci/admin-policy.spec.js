@@ -75,6 +75,21 @@ describe('admin-policy (main process)', () => {
     }
   })
 
+  it('does not replace a corrupt or unreadable administrator token', () => {
+    const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'anubis-admin-token-'))
+    const file = path.join(dir, policy.MCP_TOKEN_FILE)
+    try {
+      fs.writeFileSync(file, 'invalid-token')
+      assert.throws(() => policy.ensureMcpToken(dir), /Invalid administrator MCP token/)
+      assert.equal(fs.readFileSync(file, 'utf8'), 'invalid-token')
+      fs.unlinkSync(file)
+      fs.mkdirSync(file)
+      assert.throws(() => policy.ensureMcpToken(dir))
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   it('client and main lockable key lists match', async () => {
     const client = await import('../../client/common/admin-policy.js')
     assert.deepEqual(client.ADMIN_LOCKABLE_KEYS, policy.ADMIN_LOCKABLE_KEYS)

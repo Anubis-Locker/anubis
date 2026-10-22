@@ -142,15 +142,26 @@ function getAdminLockedKeys (env = process.env) {
  */
 function ensureMcpToken (dir) {
   const file = path.join(dir, MCP_TOKEN_FILE)
-  try {
-    const existing = fs.readFileSync(file, 'utf8').trim()
-    if (existing.length >= 32) {
-      return existing
+  const read = () => {
+    const token = fs.readFileSync(file, 'utf8').trim()
+    if (!/^[0-9a-f]{64}$/.test(token)) {
+      throw new Error(`Invalid administrator MCP token in ${file}`)
     }
-  } catch (e) {}
+    return token
+  }
+  try {
+    return read()
+  } catch (e) {
+    if (e.code !== 'ENOENT') throw e
+  }
   const token = crypto.randomBytes(32).toString('hex')
   fs.mkdirSync(dir, { recursive: true })
-  fs.writeFileSync(file, token, { mode: 0o600 })
+  try {
+    fs.writeFileSync(file, token, { mode: 0o600, flag: 'wx' })
+  } catch (e) {
+    if (e.code === 'EEXIST') return read()
+    throw e
+  }
   return token
 }
 

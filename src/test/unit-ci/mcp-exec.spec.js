@@ -9,6 +9,7 @@
 const { test, describe, before, after } = require('node:test')
 const assert = require('assert/strict')
 const { EventEmitter } = require('events')
+const { TEST_MCP_TOKEN } = require('./mcp-policy-fixture')
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. execCommand (session-common.js) with mock ssh2 client
@@ -200,6 +201,30 @@ const {
 
 Module._load = originalLoad
 
+describe('MCP administrator policy enforcement', () => {
+  test('does not fall back to an unauthenticated server when token access fails', () => {
+    const policy = require('../../app/common/admin-policy')
+    const original = policy.getMcpToken
+    policy.getMcpToken = () => { throw new Error('token storage unavailable') }
+    try {
+      assert.throws(() => widgetRun({ host: '127.0.0.1', port: 0 }), /token storage unavailable/)
+    } finally {
+      policy.getMcpToken = original
+    }
+  })
+
+  test('refuses manual widget startup when the administrator disabled MCP', () => {
+    const previous = process.env.ANUBIS_ADMIN_MCP_ENABLED
+    process.env.ANUBIS_ADMIN_MCP_ENABLED = '0'
+    try {
+      assert.throws(() => widgetRun({ host: '127.0.0.1', port: 0 }), /disabled by the administrator/)
+    } finally {
+      if (previous === undefined) delete process.env.ANUBIS_ADMIN_MCP_ENABLED
+      else process.env.ANUBIS_ADMIN_MCP_ENABLED = previous
+    }
+  })
+})
+
 // The server responds with plain JSON for jsonrpc requests (axios parses it
 // into an object automatically), but still falls back to SSE `data: ` framing
 // in some paths — handle both here.
@@ -217,6 +242,7 @@ function parseSseBody (body) {
 
 async function mcpPost (port, body, sid) {
   const headers = {
+    Authorization: `Bearer ${TEST_MCP_TOKEN}`,
     'Content-Type': 'application/json',
     Accept: 'application/json, text/event-stream'
   }

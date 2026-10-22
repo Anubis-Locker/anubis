@@ -9,6 +9,7 @@
 
 const { test, describe, before, after } = require('node:test')
 const assert = require('assert/strict')
+const { TEST_MCP_TOKEN } = require('./mcp-policy-fixture')
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. TaskManager pure unit tests
@@ -236,6 +237,7 @@ function parseSseBody (body) {
 
 async function mcpPost (port, body, sid) {
   const headers = {
+    Authorization: `Bearer ${TEST_MCP_TOKEN}`,
     'Content-Type': 'application/json',
     Accept: 'application/json, text/event-stream'
   }

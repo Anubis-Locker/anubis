@@ -1381,16 +1381,12 @@ class ElectermMCPServer {
 }
 
 function applyAdminMcp (config) {
-  try {
-    const { getMcpToken, getAdminPolicy } = require('../common/admin-policy')
-    if (getAdminPolicy().values.mcpServerEnabled) {
-      config.apiKey = getMcpToken()
-      return true
-    }
-  } catch (e) {
-    console.error('admin MCP token unavailable:', e.message)
+  const { getMcpToken, getAdminPolicy } = require('../common/admin-policy')
+  if (!getAdminPolicy().values.mcpServerEnabled) {
+    throw new Error('MCP server is disabled by the administrator')
   }
-  return false
+  config.apiKey = getMcpToken()
+  return true
 }
 
 function widgetRun (instanceConfig, ctx = {}) {

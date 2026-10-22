@@ -184,7 +184,7 @@ dependency lock rather than replacing native-module versions during the build.
 
 | Platform | Status |
 |---|---|
-| Linux (deb/AppImage/tar.gz) | Current-source CI artifacts built; full runtime acceptance blocked in the headless VPS session by its missing desktop secret service; publication pending |
+| Linux (deb/AppImage/tar.gz) | CI artifacts built. Packaged tar.gz passed terminal execution, settings, bookmark persistence and OS-keyring encryption in an isolated Ubuntu desktop session; deb/AppImage installation and publication pending |
 | Windows (NSIS) | Runtime repairs installed and checked: terminal, files, SSH/SFTP, MCP, AI, VNC/RDP display and input, encrypted hosted sync, reverse SSH tunnel and first-run migration. Installation between update versions remains unverified |
 | macOS (dmg) | x64 and arm64 CI artifacts built unsigned and without notarization; macOS runtime verification pending |
 
@@ -195,9 +195,10 @@ JSON and OpenAI/Anthropic SSE requests return the same explicit placeholder,
 not generated commands or bookmarks; a real model is still required for those.
 
 Linux desktop sessions need a working D-Bus session and an unlocked Secret
-Service/keyring for OS-backed password encryption. A bare VPS virtual display
-does not provide these services. Its startup is not equivalent to acceptance on
-a configured Linux desktop; disabling encryption is not an acceptance workaround.
+Service/keyring for OS-backed password encryption. The Ubuntu runtime check used
+a private D-Bus session and an unlocked gnome-keyring, not a plaintext password
+store. A bare VPS virtual display does not provide these services; disabling
+encryption is not an acceptance workaround.
 
 ## License
 

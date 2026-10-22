@@ -5,12 +5,14 @@ const { tmpdir, homedir } = require('os')
 const { join, resolve, dirname, basename } = require('path')
 const { createHash } = require('crypto')
 const http = require('http')
+const { spawn } = require('child_process')
 const { _electron: electron } = require('playwright')
 const {
   startTestSshServer, stopTestSshServer, HOST_KEY_PUBLIC, TEST_USERNAME, TEST_PASSWORD
 } = require('../integration/lib/ssh-test-server')
 const { startTestVncServer } = require('../integration/lib/vnc-test-server')
 const { startSshForward } = require('../integration/lib/ssh-forward')
+const { snapshotWindowsProtocols } = require('../integration/lib/windows-protocol-fixture')
 
 test('packaged Windows desktop functionality', { timeout: 180000 }, async t => {
   const root = mkdtempSync(join(tmpdir(), 'anubis-desktop-smoke-'))
@@ -36,6 +38,7 @@ test('packaged Windows desktop functionality', { timeout: 180000 }, async t => {
   let localHttp
   const errors = []
   const executablePath = resolve(process.env.ANUBIS_SMOKE_EXE || join('dist', 'win-unpacked', 'anubis.exe'))
+  let protocols = null
   async function launch ({ exe = executablePath, profile = userData, dataPath = data } = {}) {
     app = await electron.launch({
       executablePath: exe,
@@ -89,9 +92,11 @@ test('packaged Windows desktop functionality', { timeout: 180000 }, async t => {
         const clean = content.split(/(?<=\n)/).filter(line => !cleanupHostEntries.has(line.trim())).join('')
         if (clean !== content) writeFileSync(knownHosts, clean)
       }
+      if (protocols) protocols.restore()
       rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
     }
   })
+  protocols = snapshotWindowsProtocols(root, [root, executablePath])
   const page = await launch()
   await t.test('local terminal executes a command, not just opens a window', async () => {
     await page.waitForFunction(() => /PS [^\r\n]*>/.test(document.body.innerText))
@@ -123,6 +128,27 @@ test('packaged Windows desktop functionality', { timeout: 180000 }, async t => {
     assert.equal(saved.title, bookmark.title)
     await page.evaluate(() => window.store.hideSettingModal())
   })
+  await t.test('administrator policy rejects user overrides while ordinary settings remain editable', async () => {
+    const values = await page.evaluate(async () => {
+      const previousFontSize = window.store.config.fontSize
+      await window.pre.runGlobalAsync('saveUserConfig', {
+        baseURLAI: 'https://invalid.example/ai',
+        mcpServerEnabled: false,
+        syncSetting: { cloudApiUrl: 'https://invalid.example/sync', autoSync: false },
+        fontSize: previousFontSize + 1,
+        adminLockedKeys: []
+      })
+      const saved = await window.pre.runGlobalAsync('dbAction', 'data', 'findOne', { _id: 'userConfig' })
+      await window.pre.runGlobalAsync('saveUserConfig', { fontSize: previousFontSize })
+      return { saved, originalAI: window.store.config.baseURLAI, originalSync: window.store.config.syncSetting.cloudApiUrl, previousFontSize }
+    })
+    assert.equal(values.saved.baseURLAI, values.originalAI)
+    assert.equal(values.saved.syncSetting.cloudApiUrl, values.originalSync)
+    assert.equal(values.saved.mcpServerEnabled, true)
+    assert.equal(values.saved.adminLockedKeys, undefined)
+    assert.equal(values.saved.fontSize, values.previousFontSize + 1)
+    assert.equal(values.saved.syncSetting.autoSync, false)
+  })
   await t.test('SSH shell and SFTP work through the packaged server', async () => {
     await page.evaluate(opts => window.store.addTab(opts), {
       type: 'ssh',
@@ -146,6 +172,35 @@ test('packaged Windows desktop functionality', { timeout: 180000 }, async t => {
     await page.locator('.session-current .term-sftp-tabs .type-tab').nth(1).click()
     await page.locator('.session-current .sftp-remote-section').getByText(markerFile, { exact: true }).first().waitFor()
   })
+  await t.test('branded deep links reach the running instance once and connect to SSH', async () => {
+    const before = await page.evaluate(() => window.store.tabs.length)
+    const link = `anubis://${encodeURIComponent(TEST_USERNAME)}:${encodeURIComponent(TEST_PASSWORD)}@127.0.0.1:${port}?title=Anubis%20deep%20link%20smoke&useSshAgent=false`
+    await new Promise((resolve, reject) => {
+      const child = spawn(executablePath, [`--user-data-dir=${userData}`, link], {
+        env: { ...process.env, DATA_PATH: data, ANUBIS_ADMIN_AUTOSTART: '0', ANUBIS_ADMIN_ERROR_REPORT: '0' },
+        stdio: 'ignore',
+        windowsHide: true
+      })
+      const timer = setTimeout(() => {
+        child.kill()
+        reject(new Error('Deep-link secondary instance did not exit'))
+      }, 15000)
+      child.once('error', error => {
+        clearTimeout(timer)
+        reject(error)
+      })
+      child.once('close', code => {
+        clearTimeout(timer)
+        if (code === 0) resolve()
+        else reject(new Error(`Deep-link secondary instance exited with ${code}`))
+      })
+    })
+    await page.waitForFunction(count => window.store.tabs.length === count + 1, before)
+    await page.locator('.session-current').getByText('Welcome to the electerm MCP integration test shell', { exact: false }).first().waitFor()
+    const registration = await page.evaluate(() => window.pre.runGlobalAsync('checkProtocolRegistration'))
+    assert.deepEqual(Object.keys(registration).sort(), ['anubis', 'ssh', 'telnet', 'vnc', 'rdp', 'spice', 'serial', 'ftp'].sort())
+    assert.ok(Object.values(registration).every(Boolean))
+  })
   await t.test('MCP starts automatically and accepts authenticated initialization', async () => {
     await page.waitForFunction(() => window.store.widgetInstances.some(w => w.widgetId === 'mcp-server'))
     const url = await page.evaluate(() => window.store.widgetInstances.find(w => w.widgetId === 'mcp-server').serverInfo.url)
@@ -167,6 +222,18 @@ test('packaged Windows desktop functionality', { timeout: 180000 }, async t => {
     })
     assert.equal(response.status, 200)
     assert.match(await response.text(), /"protocolVersion"/)
+    for (const authorization of ['', 'Bearer invalid-test-token']) {
+      const denied = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', Authorization: authorization },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'initialize', params: {} }),
+        signal: AbortSignal.timeout(10000)
+      })
+      assert.equal(denied.status, 401)
+    }
+    const publicInfo = await page.evaluate(() => window.store.widgetInstances.find(w => w.widgetId === 'mcp-server').serverInfo)
+    assert.equal(publicInfo.apiKey, undefined)
+    assert.equal(publicInfo.apiKeyManagedByAdmin, true)
   })
   await t.test('configured hosted AI returns a response', { skip: !process.env.ANUBIS_SMOKE_AI }, async () => {
     const result = await page.evaluate(() => {
