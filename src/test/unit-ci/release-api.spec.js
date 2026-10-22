@@ -22,6 +22,9 @@ async function fixture (t) {
   return {
     releaseFile,
     updateDir,
+    read: (name, src = '') => fetch(base + '/data/' + name + '?src=' + encodeURIComponent(src), {
+      signal: AbortSignal.timeout(5000)
+    }),
     send: (payload, signature) => {
       const body = typeof payload === 'string' ? payload : JSON.stringify(payload)
       return fetch(base + route, {
@@ -105,4 +108,30 @@ test('publication failure returns HTTP 500 and leaves the advertised version unc
   assert.equal(await response.text(), 'publication failed')
   assert.equal(fs.readFileSync(path.join(f.updateDir, 'version.html'), 'utf8'), 'v5.6.10\n')
   assert.equal(errors.length, 1)
+})
+
+test('release filters preserve exact-name, platform-key and installer-stem lookups for both feed aliases', async t => {
+  const f = await fixture(t)
+  const names = [
+    'anubis-5.6.11-win-x64-installer.exe',
+    'anubis-5.6.11-win-x64-installer.exe.blockmap',
+    'anubis-5.6.11-linux-x64.tar.gz'
+  ]
+  const release = {
+    ...event.release,
+    assets: names.map(name => ({ name, size: 32, browser_download_url: 'https://download.anubis.locker/v5.6.11/' + name }))
+  }
+  assert.equal((await f.send({ ...event, release })).status, 200)
+  for (const name of ['anubis-release.json', 'anubis-github-release.json']) {
+    for (const src of [names[0], 'win-x64-installer.exe', 'win-x64-installer']) {
+      const response = await f.read(name, src)
+      assert.equal(response.status, 200)
+      assert.equal(response.headers.get('cache-control'), 'no-store')
+      assert.deepEqual((await response.json()).release.assets.map(asset => asset.name), [names[0]])
+    }
+    assert.equal((await (await f.read(name)).json()).release.assets.length, 3)
+    assert.deepEqual((await (await f.read(name, 'unavailable-platform')).json()).release.assets, [])
+    assert.deepEqual((await (await f.read(name, 'win-x64-installer.exe.blockmap')).json()).release.assets.map(asset => asset.name), [names[1]])
+    assert.deepEqual((await (await f.read(name, 'linux-x64.tar.gz')).json()).release.assets.map(asset => asset.name), [names[2]])
+  }
 })

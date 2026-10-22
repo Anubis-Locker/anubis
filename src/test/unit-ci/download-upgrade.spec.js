@@ -33,6 +33,10 @@ after(() => {
 async function fixture (t, { metadata, download, open } = {}) {
   const events = []
   const launches = []
+  const messages = []
+  const originalSend = process.send
+  process.send = message => messages.push({ message, events: events.length })
+  t.after(() => { process.send = originalSend })
   const server = http.createServer((req, res) => {
     if (req.url.startsWith(brand.update.releaseJson)) {
       if (metadata) {
@@ -83,15 +87,16 @@ async function fixture (t, { metadata, download, open } = {}) {
       await fs.promises.rm(upgrade.dir, { recursive: true, force: true })
     }
   })
-  return { upgrade, events, launches, ws, server }
+  return { upgrade, events, launches, messages, ws, server }
 }
 
-function assertFailure ({ upgrade, events, launches }) {
+function assertFailure ({ upgrade, events, launches, messages }) {
   assert.equal(launches.length, 0)
   const errors = events.filter(e => e.id === 'upgrade:err:test-download')
   assert.equal(errors.length, 1)
   assert.equal(typeof errors[0].error.message, 'string')
   assert.equal(events.some(e => e.id === 'upgrade:end:test-download'), false)
+  assert.equal(messages.some(e => e.message.upgradeInstallerLaunched), false)
   assert.equal(globalState.getUpgradeInst(upgrade.id), undefined)
   if (upgrade.dir) {
     assert.equal(fs.existsSync(upgrade.dir), false)
@@ -114,6 +119,12 @@ test('streams to a unique directory, verifies bytes, then launches and emits upg
   assert.ok(f.events.some(e => e.id === 'upgrade:data:test-download'))
   assert.ok(f.events.filter(e => e.id.includes(':data:')).every(e => e.data < 100))
   assert.equal(globalState.getUpgradeInst(f.upgrade.id), undefined)
+  const closeMessages = f.messages.filter(e => e.message.upgradeInstallerLaunched)
+  const closesForInstaller = runtime.isWin && suffix.endsWith('-installer.exe')
+  assert.equal(closeMessages.length, closesForInstaller ? 1 : 0)
+  if (closesForInstaller) {
+    assert.equal(closeMessages[0].events, f.events.length, 'close request follows successful completion notification')
+  }
   const count = f.events.length
   await new Promise(resolve => setTimeout(resolve, 1100))
   assert.equal(f.events.length, count, 'no trailing throttled progress after completion')
@@ -230,7 +241,46 @@ test('installer launch rejection is reported rather than completing', async t =>
   assert.equal(f.launches.length, 1)
   assert.match(f.events.at(-1).error.message, /launch rejected/)
   assert.equal(f.events.some(e => e.id.includes(':end:')), false)
+  assert.equal(f.messages.some(e => e.message.upgradeInstallerLaunched), false)
   assert.equal(fs.existsSync(f.upgrade.dir), false)
+})
+
+test('cancellation while launching does not request application shutdown', async t => {
+  const f = await fixture(t, { open: async () => f.upgrade.destroy() })
+  await f.upgrade.init()
+  assert.equal(f.launches.length, 1)
+  assert.equal(f.messages.some(e => e.message.upgradeInstallerLaunched), false)
+  assert.equal(f.events.some(e => e.id.includes(':end:')), false)
+})
+
+test('successful Windows NSIS launch alone requests shutdown, after notifying the renderer', async () => {
+  const source = fs.readFileSync(path.resolve(__dirname, '../../app/server/download-upgrade.js'), 'utf8')
+  const method = source.slice(source.indexOf('  async onEnd () {'), source.indexOf('  onError (err) {'))
+    .replace('async onEnd ()', 'async function ()')
+  for (const [isWin, installSrc, shouldClose] of [
+    [true, 'win-x64-installer.exe', true],
+    [true, 'win-x64.tar.gz', false],
+    [true, 'win-x64-portable.exe', false],
+    [false, 'mac-x64.dmg', false]
+  ]) {
+    const events = []
+    const onEnd = vm.runInNewContext(`(${method})`, {
+      isWin,
+      installSrc,
+      openFile: async file => { events.push('launch') },
+      launchWindowsInstaller: async file => { events.push('launch') },
+      process: { send: message => events.push(message.upgradeInstallerLaunched ? 'close' : 'show-file') }
+    })
+    const upgrade = {
+      localPath: 'downloaded-installer',
+      dir: 'download-directory',
+      id: 'handoff',
+      ws: { s: () => events.push('end') }
+    }
+    await onEnd.call(upgrade)
+    assert.equal(upgrade.launched, true)
+    assert.deepEqual(events, ['launch', 'show-file', 'end', ...(shouldClose ? ['close'] : [])])
+  }
 })
 
 test('cancels during metadata request and destroy is idempotent', async t => {

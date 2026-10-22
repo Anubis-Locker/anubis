@@ -20,8 +20,39 @@ function createServer ({
       res.writeHead(status, { 'Content-Type': 'text/plain; charset=utf-8' })
       res.end(text)
     }
+    const url = new URL(req.url, 'http://localhost')
     if (req.method === 'GET' && req.url === '/health') return reply(200, 'ok')
-    if (req.method !== 'POST' || new URL(req.url, 'http://localhost').pathname !== route) return reply(404, 'not found')
+    if (req.method === 'GET' && ['/data/anubis-release.json', '/data/anubis-github-release.json'].includes(url.pathname)) {
+      try {
+        const data = JSON.parse(fs.readFileSync(path.join(updateDir, 'data', path.basename(url.pathname)), 'utf8'))
+        const src = url.searchParams.get('src')
+        if (src) {
+          const key = asset => asset.name.replace(/-v?\d+\.\d+\.\d+/, '').replace(/^anubis-/, '')
+          const stem = name => name.replace(/(\.tar\.gz|\.tar\.xz|\.[A-Za-z0-9]+)$/, '')
+          const assets = data.release.assets.filter(asset => src.includes('.blockmap') || !asset.name.endsWith('.blockmap'))
+          const tiers = [
+            asset => asset.name === src,
+            asset => key(asset) === src,
+            asset => stem(key(asset)) === src,
+            asset => asset.name.endsWith(src)
+          ]
+          data.release.assets = []
+          for (const match of tiers) {
+            const matches = assets.filter(match)
+            if (matches.length) {
+              data.release.assets = matches
+              break
+            }
+          }
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' })
+        return res.end(JSON.stringify(data))
+      } catch (error) {
+        console.error('Release metadata unavailable:', error)
+        return reply(500, 'release metadata unavailable')
+      }
+    }
+    if (req.method !== 'POST' || url.pathname !== route) return reply(404, 'not found')
     try {
       const body = await new Promise((resolve, reject) => {
         const chunks = []

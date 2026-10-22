@@ -8,11 +8,12 @@ const { Transform } = require('stream')
 const { pipeline } = require('stream/promises')
 const _ = require('../lib/lodash.js')
 const rp = require('axios')
-const { tempDir } = require('../common/runtime-constants')
+const { tempDir, isWin } = require('../common/runtime-constants')
 const installSrc = require('../lib/install-src')
 const { fsExport } = require('../lib/fs')
 const { createProxyAgent } = require('../lib/proxy-agent')
 const { openFile, rmrf } = fsExport
+const launchWindowsInstaller = require('../lib/launch-windows-installer')
 const log = require('../common/log')
 const globalState = require('./global-state')
 
@@ -148,7 +149,12 @@ class Upgrade {
 
   async onEnd () {
     if (!this.onDestroy) {
-      await openFile(this.localPath)
+      const windowsInstaller = isWin && installSrc.endsWith('-installer.exe')
+      if (windowsInstaller) {
+        await launchWindowsInstaller(this.localPath)
+      } else {
+        await openFile(this.localPath)
+      }
       this.launched = true
       if (this.onDestroy) {
         return
@@ -162,6 +168,9 @@ class Upgrade {
         id: 'upgrade:end:' + this.id,
         data: this.dir
       })
+      if (windowsInstaller && process.send) {
+        process.send({ upgradeInstallerLaunched: true })
+      }
     }
   }
 

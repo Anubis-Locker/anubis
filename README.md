@@ -233,6 +233,10 @@ Include `services\nginx-release-location.conf` inside the update subdomain's
 HTTPS server block, and configure the repository's Releases webhook to use the
 same path and HMAC secret. The proxy preserves the request body and signature;
 the normal static update/download routes are unchanged.
+Use `services\nginx-update-filter.conf` for the release JSON location: `?src=`
+lookups are served by the same receiver, without depending on the website's
+separate Node process. Exact asset names, platform suffixes and installer stems
+are supported; blockmaps are excluded unless explicitly requested.
 
 Linux desktop sessions need a working D-Bus session and an unlocked Secret
 Service/keyring for OS-backed password encryption. The Ubuntu runtime check used

@@ -63,6 +63,8 @@ const {
   unmaximize
 } = require('./window-control')
 const { openFileWithEditor } = require('./open-file-with-editor')
+const closeForUpgrade = require('./upgrade-close')
+const { isWin } = require('../common/runtime-constants')
 const { loadFontList } = require('./font-list')
 // `../upgrade` pulls in the whole default-data set (db-defaults,
 // default-local-bookmarks, init-db, version-upgrade) and nothing needs it until
@@ -162,6 +164,7 @@ async function initAppServer () {
       sshKeysPath
     }, sysLocale)
     child.on('message', (m) => {
+      closeForUpgrade(m, isWin, globalState)
       if (m && m.showFileInFolder) {
         if (!isMac) {
           shell.showItemInFolder(m.showFileInFolder)
