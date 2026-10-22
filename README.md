@@ -209,6 +209,15 @@ Reverse-proxy `/api/ai` on `ai.anubis.locker` to this service. Both ordinary
 JSON and OpenAI/Anthropic SSE requests return the same explicit placeholder,
 not generated commands or bookmarks; a real model is still required for those.
 
+The management API source is `services\management-api.js`; run it with
+`node services\management-api.js`. It binds loopback on `PORT` (default 7106),
+persists reports in `DATA_DIR` (default `/var/lib/anubis-mgmt`) and accepts desktop
+reports at `POST /api/report`. Configure `ADMIN_TOKEN` only on the server:
+`GET /api/installs` and `GET /api/reports` require its Bearer token and remain
+inaccessible when the token is missing. `/api/installs` returns the latest report
+per installation, not remote-access passwords. Storage failures return an error
+instead of acknowledging a report that was not saved.
+
 Linux desktop sessions need a working D-Bus session and an unlocked Secret
 Service/keyring for OS-backed password encryption. The Ubuntu runtime check used
 a private D-Bus session and an unlocked gnome-keyring, not a plaintext password
