@@ -178,6 +178,23 @@ test('packaged Windows desktop functionality', { timeout: 180000 }, async t => {
     })
     assert.equal(result.error, undefined)
     assert.ok(result.response?.length > 0)
+    const streamed = await page.evaluate(async () => {
+      const c = window.store.config
+      const start = await window.pre.runGlobalAsync(
+        'AIchat', 'Anubis streaming smoke test', c.modelAI, c.roleAI,
+        c.baseURLAI, c.apiPathAI, c.apiKeyAI, c.proxyAI, true, c.authHeaderNameAI
+      )
+      if (start.error || !start.sessionId) return start
+      for (let i = 0; i < 100; i++) {
+        const state = await window.pre.runGlobalAsync('getStreamContent', start.sessionId)
+        if (state.error || !state.hasMore) return state
+        await new Promise(resolve => setTimeout(resolve, 50))
+      }
+      throw new Error('Hosted AI stream did not finish')
+    })
+    assert.equal(streamed.error, undefined)
+    assert.equal(streamed.hasMore, false)
+    assert.equal(streamed.content, result.response)
   })
   await t.test('VNC displays remote pixels and sends keyboard and pointer input', async () => {
     await page.evaluate(port => window.store.addTab({

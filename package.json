@@ -57,7 +57,7 @@
     "@playwright/test": "1.64.1",
     "playwright": "1.64.1",
     "@ai-security-tool/icons": "1.0.1",
-    "@ai-security-tool/resource": "2.2.1",
+    "@ai-security-tool/resource": "2.2.2",
     "@ant-design/icons": "6.2.5",
     "@fontsource/maple-mono": "^5.2.5",
     "@novnc/novnc": "1.7.0",

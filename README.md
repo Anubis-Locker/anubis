@@ -184,9 +184,15 @@ dependency lock rather than replacing native-module versions during the build.
 
 | Platform | Status |
 |---|---|
-| Linux (deb/rpm/AppImage/tar.gz) | ✅ built and published |
+| Linux (deb/AppImage/tar.gz) | Current-source CI artifacts built; Linux runtime acceptance and publication pending |
 | Windows (NSIS) | Runtime repairs installed and checked: terminal, files, SSH/SFTP, MCP, AI, VNC/RDP display and input, encrypted hosted sync, reverse SSH tunnel and first-run migration. Installation between update versions remains unverified |
-| macOS (dmg) | ⏳ not yet built — requires macOS/CI runner |
+| macOS (dmg) | x64 and arm64 CI artifacts built unsigned and without notarization; macOS runtime verification pending |
+
+The hosted AI placeholder source is `services\ai-stub.js`; run it with
+`node services\ai-stub.js` (`PORT` defaults to 7105, bound to loopback).
+Reverse-proxy `/api/ai` on `ai.anubis.locker` to this service. Both ordinary
+JSON and OpenAI/Anthropic SSE requests return the same explicit placeholder,
+not generated commands or bookmarks; a real model is still required for those.
 
 ## License
 
