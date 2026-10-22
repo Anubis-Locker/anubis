@@ -1,0 +1,139 @@
+name: publish-self-hosted
+
+# Publishes an existing GitHub release to our own VPS (download.anubis.locker docroot):
+# assets -> releases/<tag>/, then version.html + data/anubis-release.json (the update feed).
+# Also used for rollback / re-publish: run it by hand with an older tag.
+on:
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to (re)publish, e.g. v5.6.10'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-self-hosted
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+    - name: Validate input and secrets
+      env:
+        TAG: ${{ inputs.tag }}
+        DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+      run: |
+        if ! printf '%s' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.]+)?$'; then
+          echo "::error::bad tag: $TAG"; exit 1
+        fi
+        for v in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY DEPLOY_PATH DEPLOY_KNOWN_HOSTS; do
+          if [ -z "${!v}" ]; then echo "::error::secret $v is not set"; exit 1; fi
+        done
+        case "$DEPLOY_PATH" in /*) ;; *) echo "::error::DEPLOY_PATH must be absolute"; exit 1 ;; esac
+        case "$DEPLOY_PATH" in *..*) echo "::error::DEPLOY_PATH must not contain .."; exit 1 ;; esac
+
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 24.x
+
+    # The site repo (fork/site) holds bin/publish-release.js
+    - uses: actions/checkout@v4
+      with:
+        repository: ${{ vars.SITE_REPO || format('{0}/anubis-site', github.repository_owner) }}
+        token: ${{ secrets.SITE_REPO_TOKEN || github.token }}
+        path: site
+
+    - name: Download release assets
+      env:
+        GH_TOKEN: ${{ github.token }}
+        TAG: ${{ inputs.tag }}
+      run: |
+        mkdir out
+        gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir out --pattern '*'
+        rm -f out/*.blockmap out/latest*.yml out/release.json
+        gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" > out/release.json
+        ls -l out
+        for s in win-x64-installer.exe linux-x86_64.AppImage linux-amd64.deb; do
+          ls out | grep -q -- "$s\$" || echo "::warning::no asset ending with $s (clients with this installSrc cannot update)"
+        done
+
+    - name: Configure SSH (pinned host key, strict checking)
+      env:
+        DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+        DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        DEPLOY_STATE_PATH: ${{ secrets.DEPLOY_STATE_PATH }}
+      run: |
+        umask 077
+        d="$RUNNER_TEMP/ssh"; mkdir -p "$d"
+        printf '%s\n' "$DEPLOY_SSH_KEY" > "$d/key"
+        printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$d/known_hosts"
+        port="${DEPLOY_PORT:-22}"
+        path="${DEPLOY_PATH%/}"
+        state="${DEPLOY_STATE_PATH:-$path.state}"
+        {
+          echo "export SSH_CMD='ssh -p $port -i $d/key -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$d/known_hosts'"
+          echo "export REMOTE='$DEPLOY_USER@$DEPLOY_HOST'"
+          echo "export RPATH='$path'"
+          echo "export RSTATE='$state'"
+        } > "$d/env.sh"
+        . "$d/env.sh"
+        $SSH_CMD "$REMOTE" "mkdir -p '$RPATH/releases' '$RSTATE' && echo connected"
+
+    - name: Pull publish state (history, checksums) from the server
+      run: |
+        . "$RUNNER_TEMP/ssh/env.sh"
+        rsync -a -s -e "$SSH_CMD" "$REMOTE:$RSTATE/" site/content/
+
+    - name: Build site data (publish-release.js)
+      env:
+        TAG: ${{ inputs.tag }}
+      working-directory: site
+      run: |
+        node bin/publish-release.js ../out --tag "$TAG" --rewrite-urls
+        test -s dist/version.html
+        echo "version.html: $(cat dist/version.html)"
+        test "$(cat dist/version.html)" = "$TAG" || { echo "::error::version.html != $TAG"; exit 1; }
+
+    - name: Upload assets, then the update feed
+      env:
+        TAG: ${{ inputs.tag }}
+      run: |
+        . "$RUNNER_TEMP/ssh/env.sh"
+        $SSH_CMD "$REMOTE" "mkdir -p '$RPATH/releases/$TAG'"
+        rsync -a -s --partial --exclude release.json -e "$SSH_CMD" out/ "$REMOTE:$RPATH/releases/$TAG/"
+        # pages, checksums, history first; the files clients poll go last
+        rsync -a -s -e "$SSH_CMD" \
+          --exclude '/version.html' --exclude '/version-android.html' --exclude '/data/anubis-release.json' \
+          site/dist/ "$REMOTE:$RPATH/"
+        rsync -a -s -e "$SSH_CMD" site/dist/data/anubis-release.json "$REMOTE:$RPATH/data/"
+        # the client (brand.update.releaseJson) polls /data/anubis-github-release.json: keep an alias
+        $SSH_CMD "$REMOTE" "cp -f '$RPATH/data/anubis-release.json' '$RPATH/data/anubis-github-release.json'"
+        rsync -a -s -e "$SSH_CMD" site/dist/version-android.html "$REMOTE:$RPATH/"
+        rsync -a -s -e "$SSH_CMD" site/dist/version.html "$REMOTE:$RPATH/"
+        rsync -a -s --delete -e "$SSH_CMD" site/content/ "$REMOTE:$RSTATE/"
+
+    - name: Verify on the server
+      env:
+        TAG: ${{ inputs.tag }}
+      run: |
+        . "$RUNNER_TEMP/ssh/env.sh"
+        got="$($SSH_CMD "$REMOTE" "cat '$RPATH/version.html'")"
+        test "$got" = "$TAG" || { echo "::error::server version.html is '$got'"; exit 1; }
+        echo "published $TAG"

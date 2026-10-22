@@ -1,0 +1,33 @@
+{
+  "name": "@ai-security-tool/electerm-react",
+  "version": "1.34.30",
+  "description": "react components src for Anubis-Security-Tool",
+  "main": "./client/components/main/main.jsx",
+  "license": "MIT",
+  "languageRepo": "https://github.com/ai-security-tool/locales",
+  "privacyNoticeLink": "https://docs.anubis.locker/wiki/privacy-notice",
+  "knownIssuesLink": "https://docs.anubis.locker/wiki/known-issues",
+  "sponsorLink": "https://anubis.locker",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ai-security-tool/anubis-security-tool.git"
+  },
+  "author": {
+    "name": "ZHAO Xudong",
+    "email": "zxdong@gmail.com",
+    "url": "https://github.com/zxdong262"
+  },
+  "bugs": {
+    "url": "https://github.com/ai-security-tool/anubis-security-tool/issues"
+  },
+  "homepage": "https://anubis.locker",
+  "releases": "https://download.anubis.locker/releases",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "client",
+    "README.md",
+    "LICENSE"
+  ]
+}

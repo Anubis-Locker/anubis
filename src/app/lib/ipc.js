@@ -1,0 +1,370 @@
+/**
+ * ipc main
+ */
+
+const {
+  ipcMain,
+  app,
+  BrowserWindow,
+  dialog,
+  powerMonitor,
+  globalShortcut,
+  shell
+} = require('electron')
+const globalState = require('./glob-state')
+const log = require('../common/log')
+const ipcSyncFuncs = require('./ipc-sync')
+const { dbAction } = require('./db')
+const { listItermThemes } = require('./iterm-theme')
+const installSrc = require('./install-src')
+const { getConfig } = require('./get-config')
+const loadSshConfig = require('./ssh-config')
+const {
+  listWidgets,
+  runWidget,
+  stopWidget,
+  runWidgetFunc
+} = require('../widgets/load-widget')
+const widgetLog = require('../widgets/instance-log')
+const {
+  checkMigrate,
+  migrate
+} = require('../migrate/migrate-1-to-2')
+const {
+  setPassword,
+  checkPassword
+} = require('./auth')
+const initServer = require('./init-server')
+const {
+  getLang,
+  loadLocales
+} = require('./locales')
+const { saveUserConfig } = require('./user-config-controller')
+const { changeHotkeyReg, initShortCut } = require('./shortcut')
+const lastStateManager = require('./last-state')
+const { createDialogLastDir } = require('./dialog-last-dir')
+const {
+  registerDeepLink,
+  unregisterDeepLink,
+  checkProtocolRegistration,
+  getPendingDeepLink
+} = require('./deep-link')
+const { getPendingVvFile } = require('./vv-file-open')
+const {
+  appPath,
+  isMac,
+  exePath,
+  isPortable,
+  sshKeysPath
+} = require('../common/app-props')
+const {
+  getScreenSize,
+  maximize,
+  unmaximize
+} = require('./window-control')
+const { openFileWithEditor } = require('./open-file-with-editor')
+const { loadFontList } = require('./font-list')
+// `../upgrade` pulls in the whole default-data set (db-defaults,
+// default-local-bookmarks, init-db, version-upgrade) and nothing needs it until
+// the renderer asks -- and it asks only *after* the UI has mounted. Require it
+// lazily so it stays off the pre-window startup path.
+let upgradeMod
+const upgrade = () => (upgradeMod || (upgradeMod = require('../upgrade')))
+const { listSerialPorts } = require('./serial-port')
+const initApp = require('./init-app')
+const { encryptAsync, decryptAsync } = require('./enc')
+const { safeEncrypt, safeDecrypt } = require('./safe-storage')
+const { initCommandLine } = require('./command-line')
+const {
+  getCommandStatus,
+  installCommand,
+  uninstallCommand
+} = require('./install-command')
+const { watchFile, unwatchFile } = require('./watch-file')
+const lookup = require('../common/lookup')
+const {
+  AIchat,
+  AIchatWithTools,
+  AIlistModels,
+  getStreamContent,
+  stopStream,
+  abortAIRequest
+} = require('./ai')
+
+// Security: whitelist of safe environment variables for Linux/Mac/Windows
+const SAFE_ENV_KEYS = [
+  'SHELL', 'TERM', 'TERM_PROGRAM', 'TERM_PROGRAM_VERSION', 'COLORTERM',
+  'LANG', 'LC_ALL', 'LC_CTYPE', 'LC_TERMINAL', 'LC_TERMINAL_VERSION',
+  'HOME', 'USER', 'LOGNAME', 'USERNAME',
+  'PATH', 'PATHEXT',
+  'TMPDIR', 'TMP', 'TEMP',
+  'DISPLAY', 'WAYLAND_DISPLAY', 'XDG_SESSION_TYPE', 'XDG_RUNTIME_DIR',
+  'XDG_DATA_DIRS', 'XDG_CONFIG_DIRS', 'XDG_CURRENT_DESKTOP', 'XDG_SEAT', 'XDG_VTNR',
+  'SSH_AUTH_SOCK', 'SSH_AGENT_PID', 'SSH_CLIENT', 'SSH_CONNECTION', 'SSH_TTY',
+  'NODE_PATH', 'NODE_ENV', 'NVM_DIR', 'NVM_BIN',
+  'NPM_CONFIG_PREFIX', 'NPM_CONFIG_CACHE',
+  'GIT_EDITOR', 'GIT_PAGER', 'GIT_TERMINAL_PROMPT',
+  'EDITOR', 'VISUAL', 'PAGER',
+  'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'no_proxy',
+  'APPDATA', 'LOCALAPPDATA', 'ProgramFiles', 'ProgramFiles(x86)', 'CommonProgramFiles',
+  'ComSpec', 'SystemRoot', 'SystemDrive', 'USERPROFILE', 'USERDOMAIN',
+  'COMPUTERNAME', 'NUMBER_OF_PROCESSORS', 'PROCESSOR_ARCHITECTURE', 'OS',
+  'Apple_PubSub_Socket_Render',
+  'DBUS_SESSION_BUS_ADDRESS', 'DESKTOP_SESSION', 'GNOME_DESKTOP_SESSION_ID', 'KDE_FULL_SESSION',
+  'CI', 'DOCKER_HOST', 'CONTAINER'
+]
+
+// Security: the dynamic IPC bridges (runGlobalAsync / runSync) only dispatch to
+// functions that are explicitly wired into the dispatch object as own properties.
+// Checking `hasOwnProperty` (instead of a hand-maintained name list) means the
+// allowlist can never drift from the real exports, and it blocks prototype-chain
+// pivots like 'constructor', 'toString', '__proto__', 'hasOwnProperty' (CWE-863 / CWE-749).
+function isExportedIpcFunc (obj, name) {
+  return Object.prototype.hasOwnProperty.call(obj, name) && typeof obj[name] === 'function'
+}
+
+// Only the main app window's webContents may use the dynamic IPC bridges. This blocks
+// any other renderer frame (webviews, popups, or an attacker page that navigated the
+// window) from reaching runGlobalAsync / runSync (CWE-863 / CWE-749).
+function isTrustedIpcSender (event) {
+  const win = globalState.get('win')
+  return !!win && event.sender === win.webContents
+}
+
+// Electron 43 made file dialogs default to Downloads and stopped the OS from
+// restoring the last used directory, so we keep that memory ourselves. See
+// ./dialog-last-dir.js.
+const dialogLastDir = createDialogLastDir({
+  get: (key) => lastStateManager.get(key),
+  set: (key, value) => lastStateManager.set(key, value),
+  log: console
+})
+
+async function initAppServer () {
+  const {
+    config
+  } = await getConfig(globalState.get('serverInited'))
+  // must happen before the server child is forked: it opens its own log level
+  // from the inherited ELECTERM_DEBUG (see ../server/child-process.js)
+  log.setDebugMode(!!config.debug)
+  const {
+    langs,
+    langMap,
+    sysLocale
+  } = await loadLocales()
+  const language = getLang(config, sysLocale, langs)
+  config.language = language
+  globalState.set('langMap', langMap)
+  if (!globalState.get('serverInited')) {
+    const child = await initServer(config, {
+      ...process.env,
+      appPath,
+      sshKeysPath
+    }, sysLocale)
+    child.on('message', (m) => {
+      if (m && m.showFileInFolder) {
+        if (!isMac) {
+          shell.showItemInFolder(m.showFileInFolder)
+        }
+      }
+    })
+    globalState.set('serverInited', true)
+  }
+  globalState.set('config', config)
+}
+
+function initIpc () {
+  powerMonitor.on('resume', () => {
+    globalState.get('win').webContents.send('power-resume', null)
+  })
+  async function init () {
+    const {
+      langs,
+      langMap
+    } = await loadLocales()
+    const config = globalState.get('config')
+    const globs = {
+      config,
+      langs,
+      langMap,
+      installSrc,
+      appPath,
+      exePath,
+      isPortable,
+      // where running widgets write their logs; the widget manager reads them
+      // straight off disk (see widgets/instance-log.js)
+      widgetLogPath: widgetLog.getLogDir()
+    }
+    initApp(langMap, config)
+    initShortCut(globalShortcut, globalState.get('win'), config)
+    return globs
+  }
+
+  ipcMain.on('sync-func', (event, { name, args }) => {
+    if (!isTrustedIpcSender(event) || !isExportedIpcFunc(ipcSyncFuncs, name)) {
+      console.error('[security] blocked IPC call: ' + name)
+      return
+    }
+    const result = ipcSyncFuncs[name](...args)
+    // Electron 44 made the clipboard module async: clipboard.readText() now
+    // returns a Promise. A Promise cannot be structured-cloned into a sync IPC
+    // reply, so assigning one to event.returnValue throws "An object could not
+    // be cloned." and the renderer's sendSync fails with "reply was never sent".
+    // Settling it here keeps window.pre.readClipboard() synchronous, which the
+    // client depends on -- hasFileInClipboardText() is called during render.
+    // Assigning event.returnValue asynchronously is supported: the renderer
+    // blocks until it is set.
+    if (result && typeof result.then === 'function') {
+      result.then(
+        (value) => {
+          event.returnValue = value
+        },
+        (err) => {
+          // Must always reply, or the renderer's sendSync blocks forever.
+          console.error('[ipc] sync-func ' + name + ' failed:', err)
+          event.returnValue = null
+        }
+      )
+    } else {
+      event.returnValue = result
+    }
+  })
+  const asyncGlobals = {
+    confirmExit: () => {
+      globalState.set('confirmExit', true)
+    },
+    setPassword,
+    checkPassword,
+    lookup,
+    loadSshConfig,
+    init,
+    listSerialPorts,
+    loadFontList,
+    doUpgrade: (...args) => upgrade().doUpgrade(...args),
+    checkDbUpgrade: (...args) => upgrade().checkDbUpgrade(...args),
+    checkMigrate,
+    migrate,
+    getExitStatus: () => globalState.get('exitStatus'),
+    setExitStatus: (status) => {
+      globalState.set('exitStatus', status)
+    },
+    encryptAsync,
+    decryptAsync,
+    safeEncrypt: (str) => safeEncrypt(str),
+    safeDecrypt: (str) => safeDecrypt(str),
+    dbAction,
+    getScreenSize,
+    closeApp: (closeAction = '') => {
+      globalState.set('closeAction', closeAction)
+      const win = globalState.get('win')
+      win && win.close()
+    },
+    exit: () => {
+      const win = globalState.get('win')
+      win && win.close()
+    },
+    restart: (closeAction = '') => {
+      globalState.set('closeAction', '')
+      globalState.get('win').close()
+      app.relaunch()
+    },
+    setCloseAction: (closeAction = '') => {
+      globalState.set('closeAction', closeAction)
+    },
+    minimize: () => {
+      globalState.get('win').minimize()
+    },
+    listItermThemes,
+    maximize,
+    unmaximize,
+    openDevTools: () => {
+      globalState.get('win').webContents.openDevTools()
+    },
+    setWindowSize: (update) => {
+      lastStateManager.set('windowSize', update)
+    },
+    saveUserConfig,
+    AIchat,
+    AIchatWithTools,
+    AIlistModels,
+    getStreamContent,
+    stopStream,
+    abortAIRequest,
+    setTitle: (title) => {
+      const win = globalState.get('win')
+      win && win.setTitle(require('../common/brand').name + ' - ' + title)
+    },
+    setBackgroundColor: (color = '#33333300') => {
+      const win = globalState.get('win')
+      win && win.setBackgroundColor(color)
+    },
+    // Windows + system title bar only (window controls overlay)
+    setTitleBarOverlay: (opts = {}) => {
+      const win = globalState.get('win')
+      if (win && process.platform === 'win32' && globalState.get('systemTitleBar')) {
+        win.setTitleBarOverlay(opts)
+      }
+    },
+    changeHotkey: changeHotkeyReg(globalShortcut, globalState.get('win')),
+    initCommandLine,
+    // No renderer-supplied options: the main process owns platform/execPath.
+    // `packaged` is the guard against a dev run, where execPath is Electron.
+    getElectermCommandStatus: () =>
+      getCommandStatus({ packaged: app.isPackaged }),
+    installElectermCommand: () =>
+      installCommand({ packaged: app.isPackaged }),
+    uninstallElectermCommand: () =>
+      uninstallCommand({ packaged: app.isPackaged }),
+    watchFile,
+    unwatchFile,
+    openFileWithEditor,
+    listWidgets,
+    runWidget,
+    stopWidget,
+    runWidgetFunc,
+    registerDeepLink,
+    unregisterDeepLink,
+    checkProtocolRegistration,
+    getPendingDeepLink,
+    getPendingVvFile,
+    getEnv: (key) => {
+      if (key) {
+        return SAFE_ENV_KEYS.includes(key) ? process.env[key] : ''
+      }
+      return Object.fromEntries(
+        SAFE_ENV_KEYS
+          .filter(k => process.env[k] !== undefined)
+          .map(k => [k, process.env[k]])
+      )
+    }
+  }
+  ipcMain.handle('async', (event, { name, args }) => {
+    if (!isTrustedIpcSender(event) || !isExportedIpcFunc(asyncGlobals, name)) {
+      console.error('[security] blocked IPC call: ' + name)
+      return
+    }
+    return asyncGlobals[name](...args)
+  })
+  ipcMain.handle('show-open-dialog-sync', async (event, ...args) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const opts = args[0] && typeof args[0] === 'object' ? args[0] : {}
+    const res = dialog.showOpenDialogSync(
+      win,
+      ...await dialogLastDir.withDefaultPath(args, 'open')
+    )
+    dialogLastDir.rememberOpenResult(opts, res)
+    return res
+  })
+  ipcMain.handle('show-save-dialog', async (event, ...args) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const res = await dialog.showSaveDialog(
+      win,
+      ...await dialogLastDir.withDefaultPath(args, 'save')
+    )
+    dialogLastDir.rememberSaveResult(res)
+    return res
+  })
+}
+
+exports.initIpc = initIpc
+exports.initAppServer = initAppServer

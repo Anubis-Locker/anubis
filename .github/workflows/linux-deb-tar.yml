@@ -1,0 +1,42 @@
+name: linux-deb-tar
+
+# linux x64: tar.gz + deb + AppImage
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 24.x
+    - run: npm config set legacy-peer-deps true
+    - run: npm install -g yarn
+    - run: npm i
+    - run: npm run b
+    - run: npm run pb
+
+    - name: Build tar.gz, deb, AppImage
+      env:
+        BUILD_NUMBER: ${{ secrets.BUILD_NUMBER }}
+        WORKFLOW_NAME: linux-deb-tar
+        # keep every dist*/ directory (the build script otherwise deletes them)
+        KEEP_FILE: '1'
+      run: |
+        export ANUBIS_UPDATE_URL="$(node -p "require('./src/common/brand.config').domains.update")"
+        node src/build/bin/build-linux-deb-tar
+
+    - uses: actions/upload-artifact@v4
+      with:
+        name: linux-deb-tar
+        path: |
+          dist*/*.tar.gz
+          dist*/*.deb
+          dist*/*.AppImage
+        if-no-files-found: error

@@ -1,0 +1,12 @@
+Anubis-Security-Tool
+Copyright (c) ai-security-tool
+
+This product is a derivative work of electerm (https://github.com/electerm/electerm),
+Copyright (c) since 2017~ ZHAO Xudong <zxdong@gmail.com>, released under the MIT License.
+The original MIT license text is preserved in the LICENSE file.
+
+This project is not affiliated with, endorsed by, or connected to the electerm
+project or its author. "electerm" is the name of the original project.
+
+Third-party packages (including @electerm/* npm packages) remain under their own
+licenses; see package.json and the packages' respective LICENSE files.

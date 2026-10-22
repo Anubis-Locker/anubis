@@ -1,0 +1,23 @@
+#!/bin/bash
+# Start a release: tags the current commit v<package.json version> and pushes the tag.
+# The tag triggers .github/workflows/release.yml (build -> GitHub release -> publish-self-hosted).
+# Usage: src/build/bin/release [remote]   (default remote: origin)
+set -euo pipefail
+cd "$(dirname "$0")/../../.."
+remote="${1:-origin}"
+branch="$(git rev-parse --abbrev-ref HEAD)"
+version="$(node -p "require('./package.json').version")"
+tag="v$version"
+
+if [ -n "$(git status --porcelain)" ]; then
+  echo "working tree is not clean" >&2; exit 1
+fi
+if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+  echo "tag $tag already exists" >&2; exit 1
+fi
+
+git pull --ff-only "$remote" "$branch"
+git push "$remote" "$branch"
+git tag -a "$tag" -m "release $tag"
+git push "$remote" "$tag"
+echo "pushed $tag - watch the 'release' workflow"

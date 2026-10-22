@@ -1,0 +1,58 @@
+name: web-client-publish
+
+# Publishes the client package (src/client + src/build/web-app) to OUR npm registry
+# (NPM_REGISTRY_URL / NPM_TOKEN). Trigger: tag client-vX.Y.Z (see src/build/bin/web-release) or manual.
+on:
+  push:
+    tags: ['client-v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+    - name: Check registry secrets
+      env:
+        NPM_REGISTRY_URL: ${{ secrets.NPM_REGISTRY_URL }}
+        NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+      run: |
+        for v in NPM_REGISTRY_URL NPM_TOKEN; do
+          if [ -z "${!v}" ]; then echo "::error::secret $v is not set"; exit 1; fi
+        done
+        case "$NPM_REGISTRY_URL" in https://*) ;; *) echo "::error::NPM_REGISTRY_URL must be https://"; exit 1 ;; esac
+
+    - uses: actions/checkout@v4
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 24.x
+
+    - name: Assemble and publish package
+      env:
+        NPM_REGISTRY_URL: ${{ secrets.NPM_REGISTRY_URL }}
+        NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        CLIENT_PKG_NAME: ${{ vars.CLIENT_PKG_NAME || '@ai-security-tool/anubis-react' }}
+      run: |
+        node -e "
+        const fs = require('fs'), path = require('path')
+        const root = process.cwd()
+        const app = require(path.join(root, 'package.json'))
+        const dir = path.join(root, 'src/build/web-app')
+        const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'))
+        pkg.name = process.env.CLIENT_PKG_NAME
+        pkg.version = app.version
+        pkg.publishConfig = { registry: process.env.NPM_REGISTRY_URL }
+        fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify(pkg, null, 2))
+        fs.rmSync(path.join(dir, 'client'), { recursive: true, force: true })
+        fs.cpSync(path.join(root, 'src/client'), path.join(dir, 'client'), { recursive: true })
+        "
+        cd src/build/web-app
+        host="${NPM_REGISTRY_URL#https://}"
+        printf '%s\n' "//${host%/}/:_authToken=${NPM_TOKEN}" > .npmrc
+        case "$CLIENT_PKG_NAME" in
+          @*) echo "${CLIENT_PKG_NAME%%/*}:registry=${NPM_REGISTRY_URL}" >> .npmrc ;;
+        esac
+        npm publish --registry "$NPM_REGISTRY_URL"
+        rm -f .npmrc
