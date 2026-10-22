@@ -201,7 +201,7 @@ executable and run `node --test src/test/packaged/unix-smoke.js`.
 |---|---|
 | Linux (deb/AppImage/tar.gz) | CI artifacts built. Packaged tar.gz passed terminal execution, settings, bookmark persistence and OS-keyring encryption in an isolated Ubuntu desktop session; deb/AppImage installation and publication pending |
 | Windows (NSIS) | Runtime repairs installed and checked: terminal, files, SSH/SFTP, MCP, AI, VNC/RDP display and input, encrypted hosted sync, reverse SSH tunnel and first-run migration. Isolated interactive NSIS replacement from QA 5.6.10 to 5.6.11 preserved bookmarks and passwords; public-feed rollout pending |
-| macOS (dmg) | x64 and arm64 CI artifacts built unsigned and without notarization; macOS runtime verification pending |
+| macOS (dmg) | x64 and arm64 packaged applications passed native terminal execution, local files, settings, OS-keychain encryption and bookmark/password persistence after restart (5 checks per architecture). DMGs remain unsigned and not notarized; Gatekeeper installation acceptance is not established |
 
 The hosted AI placeholder source is `services\ai-stub.js`; run it with
 `node services\ai-stub.js` (`PORT` defaults to 7105, bound to loopback).
@@ -217,6 +217,17 @@ reports at `POST /api/report`. Configure `ADMIN_TOKEN` only on the server:
 inaccessible when the token is missing. `/api/installs` returns the latest report
 per installation, not remote-access passwords. Storage failures return an error
 instead of acknowledging a report that was not saved.
+
+The versioned release receiver is `services\release-api.js`, with no Go or npm
+runtime dependencies. Configure `ANUBIS_WEBHOOK_SECRET`, `ANUBIS_RELEASE_PATH`
+(`/github-anubis-api/<existing-path>`), `ANUBIS_RELEASE_JSON` and
+`ANUBIS_UPDATE_DIR`; `PORT` defaults to loopback 7102. It accepts the existing
+GitHub HMAC-signed `release/published` webhook format and uses
+`services\publish-update.js` to update both JSON feed names before advertising
+the new `version.html`. Drafts and prereleases are ignored. Failed publication
+is logged and returns HTTP 500, not a successful acknowledgement. The legacy
+Go receiver can remain a reference module; the deployed Node receiver keeps
+backend recovery reproducible from this repository.
 
 Linux desktop sessions need a working D-Bus session and an unlocked Secret
 Service/keyring for OS-backed password encryption. The Ubuntu runtime check used
