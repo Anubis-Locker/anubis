@@ -184,7 +184,7 @@ dependency lock rather than replacing native-module versions during the build.
 
 | Platform | Status |
 |---|---|
-| Linux (deb/AppImage/tar.gz) | Current-source CI artifacts built; Linux runtime acceptance and publication pending |
+| Linux (deb/AppImage/tar.gz) | Current-source CI artifacts built; full runtime acceptance blocked in the headless VPS session by its missing desktop secret service; publication pending |
 | Windows (NSIS) | Runtime repairs installed and checked: terminal, files, SSH/SFTP, MCP, AI, VNC/RDP display and input, encrypted hosted sync, reverse SSH tunnel and first-run migration. Installation between update versions remains unverified |
 | macOS (dmg) | x64 and arm64 CI artifacts built unsigned and without notarization; macOS runtime verification pending |
 
@@ -193,6 +193,11 @@ The hosted AI placeholder source is `services\ai-stub.js`; run it with
 Reverse-proxy `/api/ai` on `ai.anubis.locker` to this service. Both ordinary
 JSON and OpenAI/Anthropic SSE requests return the same explicit placeholder,
 not generated commands or bookmarks; a real model is still required for those.
+
+Linux desktop sessions need a working D-Bus session and an unlocked Secret
+Service/keyring for OS-backed password encryption. A bare VPS virtual display
+does not provide these services. Its startup is not equivalent to acceptance on
+a configured Linux desktop; disabling encryption is not an acceptance workaround.
 
 ## License
 
