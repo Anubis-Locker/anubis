@@ -51,10 +51,19 @@ jobs:
         node src/build/bin/build-mac
 
     - name: Verify packaged desktop runtime
+      timeout-minutes: 5
       run: |
         export ANUBIS_SMOKE_EXE="$(find dist -type f -path '*.app/Contents/MacOS/anubis' -print -quit)"
         test -n "$ANUBIS_SMOKE_EXE"
         node --test src/test/packaged/unix-smoke.js
+
+    - name: Upload runtime failure screenshot
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: mac-x64-runtime-failure
+        path: packaged-unix-failure.png
+        if-no-files-found: ignore
 
     - uses: actions/upload-artifact@v4
       with:

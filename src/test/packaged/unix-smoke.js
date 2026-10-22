@@ -24,13 +24,29 @@ test('packaged Unix desktop functionality', {
   }
   const errors = []
   let app
+  let page
+  let completed = false
+  async function closeApp () {
+    const current = app
+    app = null
+    let forced = false
+    const timer = setTimeout(() => {
+      forced = true
+      current.process().kill('SIGKILL')
+    }, 10000)
+    try {
+      await current.close()
+    } finally {
+      clearTimeout(timer)
+    }
+    assert.equal(forced, false, 'packaged Unix application did not shut down within ten seconds')
+  }
   async function launch () {
     app = await electron.launch({
       executablePath: resolve(process.env.ANUBIS_SMOKE_EXE),
       args: [`--user-data-dir=${join(root, 'profile')}`],
       env: {
         ...process.env,
-        HOME: home,
         NODE_ENV: 'production',
         NODE_TEST: '',
         DATA_PATH: join(root, 'data'),
@@ -63,12 +79,16 @@ test('packaged Unix desktop functionality', {
   }
   t.after(async () => {
     try {
-      if (app) await app.close()
+      if (!completed && page && !page.isClosed()) {
+        await page.screenshot({ path: 'packaged-unix-failure.png', timeout: 5000 })
+          .catch(error => console.error('Cannot capture packaged runtime failure:', error))
+      }
+      if (app) await closeApp()
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
   })
-  let page = await launch()
+  page = await launch()
   await t.test('native terminal executes a shell command', async () => {
     await page.waitForFunction(() => /[%$#] /.test(document.querySelector('.session-current .xterm-rows')?.innerText || ''))
     const sidebar = page.locator('.control-icon-wrap.active[title="Bookmarks"]')
@@ -99,12 +119,12 @@ test('packaged Unix desktop functionality', {
     await page.evaluate(() => window.store.hideSettingModal())
   })
   await t.test('bookmarks and passwords survive a real application restart', async () => {
-    await app.close()
-    app = null
+    await closeApp()
     page = await launch()
     const saved = await page.evaluate(id => window.pre.runGlobalAsync('dbAction', 'bookmarks', 'findOne', { _id: id }), bookmark._id)
     assert.equal(saved.title, bookmark.title)
     assert.equal(saved.password, bookmark.password)
   })
   assert.deepEqual(errors, [], 'packaged Unix application logged runtime errors')
+  completed = true
 })
