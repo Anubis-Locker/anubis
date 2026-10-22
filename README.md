@@ -177,6 +177,14 @@ reverse SSH tunnel; its RDP/VNC listeners bind loopback only. These checks are
 not run by public CI and do not enable public access to the workstation.
 Update unit tests exercise real HTTP streams and mock only installer
 launch, so they do not establish successful installation between versions.
+A separate isolated Windows check downloaded an actual NSIS package through the
+desktop update UI and completed a visible, interactive installation from QA
+version 5.6.10 to 5.6.11. The installed executable reported the new version, and
+the existing bookmark and encrypted password remained readable. Production
+updater code launched NSIS; the harness closed the old QA application and handled
+the installer's "cannot be closed" Retry dialog. Automatic shutdown and
+unattended installation remain unverified. This used a loopback feed and a
+separately named QA installation, not the public release feed.
 Windows release workflows run it before uploading artifacts and use the checked-in
 dependency lock rather than replacing native-module versions during the build.
 
@@ -185,7 +193,7 @@ dependency lock rather than replacing native-module versions during the build.
 | Platform | Status |
 |---|---|
 | Linux (deb/AppImage/tar.gz) | CI artifacts built. Packaged tar.gz passed terminal execution, settings, bookmark persistence and OS-keyring encryption in an isolated Ubuntu desktop session; deb/AppImage installation and publication pending |
-| Windows (NSIS) | Runtime repairs installed and checked: terminal, files, SSH/SFTP, MCP, AI, VNC/RDP display and input, encrypted hosted sync, reverse SSH tunnel and first-run migration. Installation between update versions remains unverified |
+| Windows (NSIS) | Runtime repairs installed and checked: terminal, files, SSH/SFTP, MCP, AI, VNC/RDP display and input, encrypted hosted sync, reverse SSH tunnel and first-run migration. Isolated interactive NSIS replacement from QA 5.6.10 to 5.6.11 preserved bookmarks and passwords; public-feed rollout pending |
 | macOS (dmg) | x64 and arm64 CI artifacts built unsigned and without notarization; macOS runtime verification pending |
 
 The hosted AI placeholder source is `services\ai-stub.js`; run it with
