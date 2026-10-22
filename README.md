@@ -56,6 +56,36 @@ location, it is **copied** (never moved or deleted). The list of legacy folder n
 Encrypted values (for example the storage key) are bound to the OS keychain; if they cannot be
 decrypted after migration, re-enter the affected passwords.
 
+## Admin vs. user settings
+
+This fork adds a two-tier settings model on top of upstream electerm:
+
+- **Admin policy** (`src/app/common/admin-policy.js` + client mirror) forces a fixed set of
+  values on every start/config read/save: sync server URL, AI endpoint, auto-update, MCP
+  server + token, error reporting endpoint, and (optionally) a global proxy. These are set at
+  build time via `brand.config.js` or `ANUBIS_ADMIN_*` env vars and are **hidden/read-only**
+  in the UI — a regular user cannot see or change them.
+- **User settings** are everything else (theme, shortcuts, terminal options, per-connection
+  proxy, etc.) — fully editable as in upstream electerm.
+
+See `docs/DEFAULTS.md` for the full list of features enabled out of the box (auto sync,
+autorun on login, deep links, MCP widget, batch operations, AI bookmark, secret gist, ...)
+and `docs/ADMIN-VS-USER.md` for the policy implementation details.
+
+## Built-in services (self-hosted, no official electerm infra)
+
+All of the following run on our own domains, replacing the corresponding electerm.org /
+GitHub services:
+
+| Service | Purpose | Endpoint |
+|---|---|---|
+| Update/release site | version check, release JSON, install scripts | `update.` / `download.anubis.locker` |
+| Sync server | settings/connections sync (replaces gist/webdav defaults) | `sync.anubis.locker` |
+| AI stub | OpenAI/Anthropic-compatible chat endpoint (placeholder reply today, pluggable later) | `ai.anubis.locker` |
+| Management API | receives install/error reports, lists installed instances | `api.anubis.locker` |
+| Docs / theme mirror | wiki pages and iTerm-style theme catalogue | `docs.` / `theme.anubis.locker` |
+| Demo | browser-based demo (electerm-web) with VNC/MCP | `demo.anubis.locker` |
+
 ## Branding and resources
 
 Brand settings (name, id, domain, protocol, sponsor link, ...) are in `src/common/brand.config.js`.
@@ -110,6 +140,14 @@ npm run pb   # copies electron-builder.json and resolves the @brand-res path
 ./node_modules/.bin/electron-builder --linux tar.gz
 # check dist/ folder
 ```
+
+## Build status
+
+| Platform | Status |
+|---|---|
+| Linux (deb/rpm/AppImage/tar.gz) | ✅ built and published |
+| Windows (NSIS) | ✅ built and published (rebuild pending after latest theme/icon update) |
+| macOS (dmg) | ⏳ not yet built — requires macOS/CI runner |
 
 ## License
 
