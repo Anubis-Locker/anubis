@@ -185,8 +185,15 @@ updater code launched NSIS; the harness closed the old QA application and handle
 the installer's "cannot be closed" Retry dialog. Automatic shutdown and
 unattended installation remain unverified. This used a loopback feed and a
 separately named QA installation, not the public release feed.
-Windows release workflows run it before uploading artifacts and use the checked-in
-dependency lock rather than replacing native-module versions during the build.
+Windows release workflows run the packaged smoke test before uploading artifacts
+and use the checked-in dependency lock rather than replacing native-module
+versions during the build.
+
+Both macOS workflows run `src/test/packaged/unix-smoke.js` against the packaged
+application before uploading the DMG. It checks native terminal execution, local
+files, settings, OS-backed encryption and bookmark/password persistence after
+restart. For a configured Unix desktop, set `ANUBIS_SMOKE_EXE` to the packaged
+executable and run `node --test src/test/packaged/unix-smoke.js`.
 
 ## Build status
 

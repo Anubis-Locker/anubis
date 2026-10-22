@@ -50,6 +50,12 @@ jobs:
         fi
         node src/build/bin/build-mac-arm
 
+    - name: Verify packaged desktop runtime
+      run: |
+        export ANUBIS_SMOKE_EXE="$(find dist -type f -path '*.app/Contents/MacOS/anubis' -print -quit)"
+        test -n "$ANUBIS_SMOKE_EXE"
+        node --test src/test/packaged/unix-smoke.js
+
     - uses: actions/upload-artifact@v4
       with:
         name: mac-arm
