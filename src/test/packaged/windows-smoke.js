@@ -215,7 +215,8 @@ test('packaged Windows desktop functionality', { timeout: 180000 }, async t => {
     const download = join(root, 'batch-download.txt')
     const workflow = [
       {
-        name: 'Connect isolated SSH', action: 'connect',
+        name: 'Connect isolated SSH',
+        action: 'connect',
         params: { host: '127.0.0.1', port, username: TEST_USERNAME, password: TEST_PASSWORD, useSshAgent: false }
       },
       { name: 'Execute command', action: 'command', command: 'node -p "\'ANUBIS_\'+\'BATCH_OK\'"', afterDelay: 200 },
