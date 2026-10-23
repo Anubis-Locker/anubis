@@ -2,6 +2,7 @@ name: web-client-publish
 
 # Publishes the client package (src/client + src/build/web-app) to OUR npm registry
 # (NPM_REGISTRY_URL / NPM_TOKEN). Trigger: tag client-vX.Y.Z (see src/build/bin/web-release) or manual.
+# Existing immutable versions are verified against every assembled file, never overwritten.
 on:
   push:
     tags: ['client-v*']
@@ -35,13 +36,32 @@ jobs:
         NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         CLIENT_PKG_NAME: ${{ vars.CLIENT_PKG_NAME || '@ai-security-tool/electerm-react' }}
       run: |
-        node --test src/test/unit-ci/web-client-package.spec.js
+        node --test src/test/unit-ci/web-client-package.spec.js src/test/unit-ci/web-client-consumer.spec.js
         node src/build/bin/assemble-web-client.js
-        cd src/build/web-app
-        host="${NPM_REGISTRY_URL#https://}"
-        printf '%s\n' "//${host%/}/:_authToken=${NPM_TOKEN}" > .npmrc
-        case "$CLIENT_PKG_NAME" in
-          @*) echo "${CLIENT_PKG_NAME%%/*}:registry=${NPM_REGISTRY_URL}" >> .npmrc ;;
-        esac
-        npm publish --registry "$NPM_REGISTRY_URL"
-        rm -f .npmrc
+        state="$(node --input-type=module - <<'NODE'
+        import fs from 'node:fs'
+        const pkg = JSON.parse(fs.readFileSync('src/build/web-app/package.json', 'utf8'))
+        const registry = process.env.NPM_REGISTRY_URL.replace(/\/?$/, '/')
+        const response = await fetch(new URL(pkg.name + '/' + pkg.version, registry), {
+          redirect: 'error', signal: AbortSignal.timeout(20000)
+        })
+        if (![200, 404].includes(response.status)) throw new Error('Registry lookup failed: ' + response.status)
+        console.log(response.status === 200 ? 'published' : 'missing')
+        NODE
+        )"
+        if [ "$state" = published ]; then
+          version="$(node -p "require('./src/build/web-app/package.json').version")"
+          consumer="$(mktemp -d)"
+          npm install --prefix "$consumer" "$CLIENT_PKG_NAME@$version" --ignore-scripts \
+            --registry "$NPM_REGISTRY_URL" --no-audit --no-fund --loglevel=error
+          node src/build/bin/verify-web-client-consumer.js src/build/web-app "$consumer/node_modules/$CLIENT_PKG_NAME"
+        else
+          cd src/build/web-app
+          trap 'rm -f .npmrc' EXIT
+          host="${NPM_REGISTRY_URL#https://}"
+          printf '%s\n' "//${host%/}/:_authToken=${NPM_TOKEN}" > .npmrc
+          case "$CLIENT_PKG_NAME" in
+            @*) echo "${CLIENT_PKG_NAME%%/*}:registry=${NPM_REGISTRY_URL}" >> .npmrc ;;
+          esac
+          npm publish --registry "$NPM_REGISTRY_URL" --loglevel=error
+        fi
