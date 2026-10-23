@@ -59,13 +59,13 @@ jobs:
 
     - name: Upload runtime failure screenshot
       if: failure()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: mac-x64-runtime-failure
         path: packaged-unix-failure.png
         if-no-files-found: ignore
 
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v7
       with:
         name: mac-x64
         path: dist/*.dmg
