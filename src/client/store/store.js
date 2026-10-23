@@ -74,13 +74,14 @@ class Store {
     return store._leftSidePanelWidth
   }
 
-  // width of the far-left icon bar (the ~43px vertical strip with the menu
-  // / bookmarks / settings icons). Distinct from leftSidePanelWidth, which is
-  // the expandable bookmarks/history panel. Controlled by _leftSideBarOpen on
-  // every platform: sidebarWidth when open, 0 when hidden.
+  // Keep compact chrome for narrow windows and split-terminal workspaces.
+  // Every layout/footer/panel consumer uses this same measured column width.
   get leftSideBarWidth () {
     const { store } = window
-    return store._leftSideBarOpen ? sidebarWidth : 0
+    if (!store._leftSideBarOpen) {
+      return 0
+    }
+    return !store.isMobile && store.innerWidth >= 1100 ? 248 : sidebarWidth
   }
 
   // Same as leftSidePanelWidth: full-screen drawer on mobile, width not
@@ -302,7 +303,7 @@ class Store {
     const themeConf = store.getUiThemeConfig()
     return {
       token: {
-        borderRadius: 3,
+        borderRadius: 8,
         colorPrimary: themeConf.primary,
         colorBgBase: themeConf.main,
         colorError: themeConf.error,

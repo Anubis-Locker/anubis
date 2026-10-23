@@ -6,7 +6,7 @@ import { PureComponent } from 'react'
 import {
   Popover
 } from 'antd'
-import logoSvg from '@brand-res/res/imgs/electerm.svg?raw'
+import { ShieldCheckOutlined } from '../icons/ui-icons'
 import { shortcutDescExtend } from '../shortcuts/shortcut-handler.js'
 import MenuRender from './sys-menu.jsx'
 import { refsStatic } from '../common/ref.js'
@@ -215,6 +215,8 @@ class MenuBtn extends PureComponent {
   render () {
     const pops = {
       className: 'menu-control',
+      type: 'button',
+      'aria-label': e('menu'),
       onMouseDown: evt => evt.preventDefault(),
       onClick: this.openMenu,
       title: e('menu')
@@ -227,14 +229,17 @@ class MenuBtn extends PureComponent {
     }
     return (
       <Popover {...popProps}>
-        <div
+        <button
           {...pops}
         >
           <span
             className='menu-logo'
-            dangerouslySetInnerHTML={{ __html: logoSvg }}
-          />
-        </div>
+            aria-hidden='true'
+          >
+            <ShieldCheckOutlined />
+          </span>
+          <span className='sidebar-brand-name'>{window.et.brand.name}</span>
+        </button>
       </Popover>
     )
   }

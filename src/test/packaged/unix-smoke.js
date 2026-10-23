@@ -4,6 +4,8 @@ const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = require('node:fs')
 const { tmpdir } = require('node:os')
 const { join, resolve } = require('node:path')
 const { _electron: electron } = require('playwright')
+const { checkRendererNavigation } = require('./lib/renderer-navigation')
+const { checkUIDataFlows, checkUIDataPersistence } = require('./lib/ui-data-flows')
 
 test('packaged Unix desktop functionality', {
   skip: process.platform === 'win32',
@@ -98,6 +100,8 @@ test('packaged Unix desktop functionality', {
     await page.keyboard.press('Enter')
     await page.waitForFunction(() => document.body.innerText.includes('ANUBIS_PACKAGED_UNIX_OK'))
   })
+  await checkRendererNavigation(page, t)
+  await checkUIDataFlows(page, t)
   await t.test('file manager lists a real local file', async () => {
     await page.locator('.session-current .term-sftp-tabs .type-tab').nth(1).click()
     const address = page.locator('.session-current .sftp-local-section .sftp-title input').first()
@@ -121,6 +125,7 @@ test('packaged Unix desktop functionality', {
   await t.test('bookmarks and passwords survive a real application restart', async () => {
     await closeApp()
     page = await launch()
+    await checkUIDataPersistence(page)
     const saved = await page.evaluate(id => window.pre.runGlobalAsync('dbAction', 'bookmarks', 'findOne', { _id: id }), bookmark._id)
     assert.equal(saved.title, bookmark.title)
     assert.equal(saved.password, bookmark.password)

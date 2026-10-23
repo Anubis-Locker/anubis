@@ -73,6 +73,7 @@ export default function QuickConnect ({ batch, inputOnly }) {
       value: inputValue,
       onChange: handleChange,
       className: 'width-100 quick-connect-input',
+      'aria-label': e('quickConnect'),
       onPressEnter: handleConnect,
       placeholder: 'ssh|rdp|vnc|spice|serial|http|https://[username]:[password]@host:port?opts={...}',
       prefix: inputOnly ? <HelpIcon link={wiki} /> : undefined

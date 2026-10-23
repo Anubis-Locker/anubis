@@ -1,25 +1,22 @@
-module.exports = (app) => {
-  const express = require('express')
-  const path = require('path')
+const express = require('express')
+const path = require('path')
 
-  return new Promise((resolve) => {
-    const assetsPath = path.resolve(__dirname, '../assets')
-    const conf = {
-      maxAge: 1000 * 60 * 60 * 24 * 365
+module.exports = (app, assetsPath = path.resolve(__dirname, '../assets')) => {
+  app.use((req, res, next) => {
+    // Entry filenames can survive a same-version reinstall, but their lazy
+    // imports cannot: never persist an older local renderer in HTTP cache.
+    res.setHeader('Cache-Control', 'no-store')
+    if (req.url.startsWith('/css/_temp_') && req.url.endsWith('.css')) {
+      res.setHeader('Content-Type', 'text/css')
+      res.send('')
+      return
     }
-
-    // Handle _temp_*.css files - return empty CSS to prevent MIME type errors
-    app.use((req, res, next) => {
-      if (req.url.startsWith('/css/_temp_') && req.url.endsWith('.css')) {
-        res.setHeader('Content-Type', 'text/css')
-        res.send('')
-        return
-      }
-      next()
-    })
-
-    app.use(
-      express.static(assetsPath, conf)
-    )
+    next()
   })
+
+  app.use(express.static(assetsPath, {
+    cacheControl: false,
+    etag: false,
+    lastModified: false
+  }))
 }

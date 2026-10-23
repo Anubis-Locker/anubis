@@ -51,10 +51,10 @@ export default function LeftSidebarIcons (props) {
       <SideIcon
         key='newBookmark'
         title={e('newBookmark')}
+        onClick={onNewSsh}
       >
         <PlusCircleOutlined
           className='font22 iblock control-icon'
-          onClick={onNewSsh}
         />
       </SideIcon>
     ),
@@ -65,12 +65,15 @@ export default function LeftSidebarIcons (props) {
         trigger='click'
         placement='right'
       >
-        <div
+        <button
+          type='button'
           className='control-icon-wrap'
           title={e('quickConnect')}
+          aria-label={e('quickConnect')}
         >
           <ThunderboltOutlined className='font20 iblock control-icon' />
-        </div>
+          <span className='sidebar-nav-label'>{e('quickConnect')}</span>
+        </button>
       </Popover>
     ),
     bookmarks: (
@@ -78,9 +81,10 @@ export default function LeftSidebarIcons (props) {
         key='bookmarks'
         title={e(settingMap.bookmarks)}
         active={bookmarksActive}
+        className='bookmark-sidebar-toggle'
+        onClick={handleClickBookmark}
       >
         <BookOutlined
-          onClick={handleClickBookmark}
           className='font20 iblock control-icon bookmark-sidebar-toggle'
         />
       </SideIcon>
@@ -90,10 +94,10 @@ export default function LeftSidebarIcons (props) {
         key='terminalThemes'
         title={e(settingMap.terminalThemes)}
         active={themeActive}
+        onClick={openTerminalThemes}
       >
         <PictureOutlined
           className='font20 iblock pointer control-icon'
-          onClick={openTerminalThemes}
         />
       </SideIcon>
     ),
@@ -102,10 +106,10 @@ export default function LeftSidebarIcons (props) {
         key='setting'
         title={e(settingMap.setting)}
         active={settingActive}
+        onClick={openSetting}
       >
         <SettingOutlined
           className='iblock font20 control-icon'
-          onClick={openSetting}
         />
       </SideIcon>
     ),
@@ -114,10 +118,10 @@ export default function LeftSidebarIcons (props) {
         key='settingSync'
         title={e('settingSync')}
         active={syncActive}
+        onClick={openSettingSync}
       >
         <CloudSyncOutlined
           className='iblock font20 control-icon'
-          onClick={openSettingSync}
           spin={isSyncingSetting}
         />
       </SideIcon>
@@ -127,6 +131,7 @@ export default function LeftSidebarIcons (props) {
         key='widgets'
         title={e('widgets')}
         active={widgetsActive}
+        onClick={openWidgetsModal}
       >
         <Badge
           count={widgetInstancesLength}
@@ -137,7 +142,6 @@ export default function LeftSidebarIcons (props) {
         >
           <AppstoreOutlined
             className='iblock font20 control-icon'
-            onClick={openWidgetsModal}
           />
         </Badge>
       </SideIcon>

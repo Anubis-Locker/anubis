@@ -14,7 +14,7 @@ import {
   PanelsTopLeft, Grid2x2, Square, Loader, LoaderCircle, Minus, ArrowRight, Sun,
   Moon, CircleCheck, CircleX, TriangleAlert, Import, Upload, ArrowDown, ArrowUp,
   Save, Eraser, RotateCw, Diff, SquareMinus, ArrowLeftRight, ArrowLeft, Search,
-  Clock, CircleMinus, Lock, SquarePen, X, Frown
+  Clock, CircleMinus, Lock, SquarePen, X, Frown, ShieldCheck
 } from 'lucide-react'
 
 const STROKE = 1.75
@@ -125,3 +125,4 @@ export const LockOutlined = make(Lock)
 export const EditOutlined = make(SquarePen)
 export const CloseOutlined = make(X)
 export const FrownOutlined = make(Frown)
+export const ShieldCheckOutlined = make(ShieldCheck)

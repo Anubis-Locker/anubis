@@ -1,9 +1,8 @@
 .no-sessions
   background var(--main)
-  text-align center
-  // stack buttons / logo / history; the history flexes to fill the remaining
-  // height, so the layout adapts to logo size and button wrapping without any
-  // fixed pixel offsets.
+  color var(--text)
+  font-size 14px
+  text-align left
   display flex
   flex-direction column
   position absolute
@@ -11,41 +10,114 @@
   left 0
   right 0
   bottom 0
-  padding 50px 0
+  padding 24px
+  overflow auto
   z-index 11
-.no-session-btns
-  flex-shrink 0
-  display flex
-  flex-wrap wrap
-  justify-content center
-  align-items center
-  gap 8px
-  padding-bottom 8px
-.no-session-logo
-  flex-shrink 0
-  padding 32px 0
-.no-session-history
-  flex 1
-  min-height 0
-  display flex
-  flex-direction column
-  overflow hidden
-  .sidebar-panel-history
-    // override the global sidebar absolute positioning (top:112px) so the
-    // history fills this flex item instead.
-    position static
+  container-type inline-size
+  h1
+  h2
+    margin 0
+    color var(--text)
+    font-weight 600
+  h1
+    font-size 22px
+  h2
+    font-size 18px
+    line-height 1.5
+  .workspace-heading
+    display flex
+    align-items center
+    justify-content space-between
+    gap 12px
+    padding-bottom 20px
+  .workspace-version
+    border 1px solid var(--ui-border)
+    padding 3px 10px
+    border-radius 20px
+    font-size 12px
+    color var(--text-dark)
+  .workspace-grid
+    display grid
+    grid-template-columns minmax(0, 1.25fr) minmax(0, 1fr)
+    gap 24px
     flex 1
     min-height 0
-    .pd2x
-      width 400px
-      margin 0 auto
-.is-mobile
-  .no-sessions
-    padding 20px 0
-  .no-session-logo
-    padding 8px 0
+    grid-template-rows auto minmax(220px, 1fr)
+  .workspace-card
+    box-sizing border-box
+    min-width 0
+    border 1px solid var(--ui-border)
+    border-radius 14px
+    padding 24px
+    background linear-gradient(135deg, var(--ui-hover), transparent)
+  .workspace-welcome
+    display flex
+    flex-direction column
+    justify-content space-between
+    min-height 210px
+  .workspace-eyebrow
+    display block
+    font-size 12px
+    color var(--text-dark)
+    margin-bottom 12px
+  .workspace-protocols
+    color var(--text-dark)
+    margin 12px 0 24px
+    line-height 1.8
+    overflow-wrap anywhere
+  .workspace-connect
+    h2
+      margin-bottom 24px
+    .ant-space-compact
+      padding 0
+    .ant-input
+      min-width 0
+    .ant-input-affix-wrapper
+      min-width 0
+  .no-session-btns
+    display flex
+    flex-wrap wrap
+    align-items center
+    gap 8px
+    .ant-btn
+      height auto
+      min-height 34px
+      white-space normal
+      text-align left
   .no-session-history
+    grid-column 1 / -1
+    display flex
+    flex-direction column
+    min-height 220px
+    overflow hidden
+    h2
+      padding-bottom 16px
+      margin-bottom 16px
+      border-bottom 1px solid var(--ui-border)
     .sidebar-panel-history
+      position static
+      flex 1
+      min-height 0
       .pd2x
         width auto
-        max-width 400px
+        margin 0
+    .history-body:empty::after
+      content '—'
+      display block
+      padding 32px
+      text-align center
+      color var(--text-dark)
+
+@container (max-width: 640px)
+  .no-sessions .workspace-grid
+    grid-template-columns minmax(0, 1fr)
+    grid-template-rows auto auto minmax(180px, 1fr)
+    gap 16px
+  .no-sessions .workspace-card
+    padding 18px
+  .no-sessions .workspace-welcome
+    min-height 180px
+
+.is-mobile
+  .no-sessions
+    padding 16px

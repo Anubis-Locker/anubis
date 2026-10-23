@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import classnames from 'classnames'
 import createTitle, { createTitleWithTag } from '../../common/create-title'
-import { DeleteOutlined, BookFilled } from '@ant-design/icons'
+import { DeleteOutlined, BookOutlined } from '../icons/ui-icons'
 import { refsStatic } from '../common/ref'
 
 export default function HistoryItem (props) {
@@ -70,7 +70,7 @@ export default function HistoryItem (props) {
       <div className='elli pd1y pd2x'>
         {title}
       </div>
-      <BookFilled
+      <BookOutlined
         className='list-item-bookmark'
         title={window.translate('bookmark')}
         onClick={handleBookmark}

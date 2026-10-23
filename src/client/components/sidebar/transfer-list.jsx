@@ -50,12 +50,13 @@ export default memo(function TransferList (props) {
     onOpenChange: setOpen
   }
   return (
-    <div
-      className='control-icon-wrap'
-      title={e('fileTransfers')}
-    >
-      <Popover
-        {...popProps}
+    <Popover {...popProps}>
+      <button
+        type='button'
+        className='control-icon-wrap'
+        title={e('fileTransfers')}
+        aria-label={e('fileTransfers')}
+        aria-expanded={open}
       >
         <Badge
           {...bdProps}
@@ -64,7 +65,8 @@ export default memo(function TransferList (props) {
             className='iblock font20 control-icon'
           />
         </Badge>
-      </Popover>
-    </div>
+        <span className='sidebar-nav-label'>{e('fileTransfers')}</span>
+      </button>
+    </Popover>
   )
 })

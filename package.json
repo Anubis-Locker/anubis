@@ -1,6 +1,6 @@
 {
   "name": "anubis",
-  "version": "5.6.10",
+  "version": "5.6.11",
   "description": "Anubis-Security-Tool: terminal/ssh/sftp/telnet/serialport/RDP/VNC/Spice/ftp client (Linux, macOS, Windows).",
   "main": "app.js",
   "scripts": {
@@ -18,7 +18,7 @@
     "fix": "standard --fix",
     "test": "npm run test1 && npm run test2",
     "test-unit-ci": "node --test src/test/unit-ci/*.spec.js",
-    "test-packaged-windows": "node --test src/test/packaged/windows-smoke.js",
+    "test-packaged-windows": "node --test --test-concurrency=1 src/test/packaged/windows-smoke.js src/test/packaged/warm-cache-smoke.js",
     "test-integration": "node --test src/test/integration/*.spec.js",
     "test1": "./node_modules/.bin/playwright test src/test/e2e/00*.js --workers=1 --workers=1",
     "test2": "./node_modules/.bin/playwright test src/test/e2e/01*.js --workers=1",

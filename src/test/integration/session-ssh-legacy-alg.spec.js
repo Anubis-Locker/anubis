@@ -296,7 +296,7 @@ describe('legacy ssh algorithms — in-process server', () => {
       const out = await waitForData(
         term,
         /LEGACY-SHELL-OK/,
-        'echo legacy-shell-ok | tr a-z A-Z'
+        'node -p "\'legacy-shell-ok\'.toUpperCase()"'
       )
       assert.match(out, /LEGACY-SHELL-OK/)
     } finally {

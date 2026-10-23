@@ -17,18 +17,18 @@ function parsor (themeTxt) {
 
 const defaultThemeDark = () => {
   return parsor(`
-main-dark=#101113
-main-light=#25272C
-text=#E4E7EC
-text-light=#F8FAFC
-text-dark=#98A2B3
-text-disabled=#667085
-primary=#22D3EE
-info=#22D3EE
+main-dark=#101010
+main-light=#303030
+text=#E8E8E8
+text-light=#FAFAFA
+text-dark=#B4B4B4
+text-disabled=#858585
+primary=#E8E8E8
+info=#A3A3A3
 success=#34D399
 error=#F87171
 warn=#FBBF24
-main=#18191C
+main=#1B1B1B
   `)
 }
 const defaultThemeLightFunc = () => {

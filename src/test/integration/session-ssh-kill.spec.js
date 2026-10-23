@@ -161,7 +161,7 @@ describe('session-ssh kill() releases the connection', () => {
 
   test('kill() reaps the proxy command child process', async () => {
     const { bin, pidFile } = writeStubProxy()
-    const term = await connect({ proxyCommand: bin })
+    const term = await connect({ proxyCommand: `"${process.execPath}" "${bin}"` })
     await waitFor(() => fs.existsSync(pidFile))
     const childPid = Number(fs.readFileSync(pidFile, 'utf8'))
     assert.ok(isAlive(childPid), 'stub proxy should be running')

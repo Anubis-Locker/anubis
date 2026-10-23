@@ -173,3 +173,103 @@
   filter invert(80%)
 .sidebar-inner
   padding-right 8px
+
+.sidebar
+  box-sizing border-box
+  border-right 1px solid var(--ui-border)
+  .sidebar-nav-label
+  .sidebar-brand-name
+    display none
+  .sidebar-bar
+    padding 0 5px 12px
+    > .control-icon-wrap:first-child
+      box-sizing border-box
+      height 60px
+      padding 12px 0
+      margin 0 -5px 8px
+      border-bottom 1px solid var(--ui-border)
+      border-radius 0
+  button.control-icon-wrap
+    display flex
+    align-items center
+    justify-content center
+    gap 12px
+    width 100%
+    min-height 40px
+    margin 3px 0
+    padding 9px 4px
+    border 0
+    border-radius 8px
+    background transparent
+    color var(--text-dark)
+    font inherit
+    font-size 14px
+    cursor pointer
+    .control-icon
+      font-size 19px
+      color inherit
+    &:hover
+    &.active
+      background var(--ui-hover)
+      color var(--text)
+    &:focus-visible
+      outline 2px solid var(--primary)
+      outline-offset -2px
+  .menu-control
+    display flex
+    align-items center
+    justify-content center
+    gap 10px
+    width 100%
+    height 36px
+    padding 0
+    border 0
+    border-radius 8px
+    background transparent
+    color var(--text)
+    font inherit
+    &:focus-visible
+      outline 2px solid var(--primary)
+  .menu-logo
+    display inline-flex
+    align-items center
+    justify-content center
+    flex-shrink 0
+    width 30px
+    height 30px
+    font-size 22px
+    border-radius 9px
+    color var(--primary-contrast)
+    background var(--primary)
+    svg
+      fill none
+  &.sidebar-expanded
+    .sidebar-bar
+      padding-left 10px
+      padding-right 10px
+      > .control-icon-wrap:first-child
+        margin-left -10px
+        margin-right -10px
+        padding-left 16px
+        padding-right 16px
+    .menu-control
+      justify-content flex-start
+      text-align left
+    .sidebar-brand-name
+      display block
+      font-size 13px
+      font-weight 600
+      line-height 1.4
+      overflow-wrap anywhere
+    .sidebar-nav-label
+      display block
+      min-width 0
+      text-align left
+      overflow-wrap anywhere
+      line-height 1.4
+    button.control-icon-wrap
+      justify-content flex-start
+      padding 10px 12px
+      > .anticon
+      > .ant-badge
+        flex-shrink 0

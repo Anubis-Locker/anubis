@@ -16,6 +16,7 @@
   ],
   "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
   "win": {
+    "requestedExecutionLevel": "asInvoker",
     "target": [
       "tar.gz",
       "appx",
@@ -66,6 +67,12 @@
       ]
     },
     {
+      "name": "FTP Protocol",
+      "schemes": [
+        "ftp"
+      ]
+    },
+    {
       "name": "Anubis Protocol",
       "schemes": [
         "anubis"
@@ -89,6 +96,9 @@
   },
   "nsis": {
     "oneClick": false,
+    "perMachine": false,
+    "include": "src/build/windows-installer.nsh",
+    "deleteAppDataOnUninstall": false,
     "artifactName": "${productName}-${version}-${os}-${arch}-installer.${ext}",
     "allowToChangeInstallationDirectory": true,
     "installerIcon": "@brand-res/res/icons/win/icon.ico",

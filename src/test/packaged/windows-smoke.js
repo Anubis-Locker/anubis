@@ -11,8 +11,12 @@ const {
   startTestSshServer, stopTestSshServer, HOST_KEY_PUBLIC, TEST_USERNAME, TEST_PASSWORD
 } = require('../integration/lib/ssh-test-server')
 const { startTestVncServer } = require('../integration/lib/vnc-test-server')
+const { startTestFtpServer } = require('../integration/lib/ftp-test-server')
+const { startTestTelnetServer } = require('../integration/lib/telnet-test-server')
 const { startSshForward } = require('../integration/lib/ssh-forward')
 const { snapshotWindowsProtocols } = require('../integration/lib/windows-protocol-fixture')
+const { checkRendererNavigation } = require('./lib/renderer-navigation')
+const { checkUIDataFlows, checkUIDataPersistence } = require('./lib/ui-data-flows')
 
 test('packaged Windows desktop functionality', { timeout: 180000 }, async t => {
   const root = mkdtempSync(join(tmpdir(), 'anubis-desktop-smoke-'))
@@ -28,6 +32,8 @@ test('packaged Windows desktop functionality', { timeout: 180000 }, async t => {
   writeFileSync(join(remoteFiles, markerFile), 'sftp fixture')
   const server = await startTestSshServer({ port: 0, rootDir: remoteFiles })
   const vnc = await startTestVncServer()
+  const ftp = await startTestFtpServer({ rootDir: remoteFiles, username: TEST_USERNAME, password: TEST_PASSWORD })
+  const telnet = await startTestTelnetServer()
   const port = server.address().port
   const knownHosts = join(homedir(), '.ssh', 'known_hosts')
   const testHostEntry = `[127.0.0.1]:${port} ${HOST_KEY_PUBLIC}`
@@ -85,6 +91,8 @@ test('packaged Windows desktop functionality', { timeout: 180000 }, async t => {
     } finally {
       await stopTestSshServer(server)
       await vnc.close()
+      await ftp.close()
+      await telnet.close()
       if (rdpForward) await rdpForward.close()
       if (localHttp) await new Promise(resolve => localHttp.close(resolve))
       if (existsSync(knownHosts)) {
@@ -107,6 +115,8 @@ test('packaged Windows desktop functionality', { timeout: 180000 }, async t => {
     await page.keyboard.press('Enter')
     await page.waitForFunction(() => document.body.innerText.includes('ANUBIS_TERMINAL_OK'))
   })
+  await checkRendererNavigation(page, t)
+  await checkUIDataFlows(page, t)
   await t.test('local file manager lists actual files', async () => {
     await page.locator('.session-current .term-sftp-tabs .type-tab').nth(1).click()
     const address = page.locator('.session-current .sftp-local-section .sftp-title input').first()
@@ -200,6 +210,36 @@ test('packaged Windows desktop functionality', { timeout: 180000 }, async t => {
     const registration = await page.evaluate(() => window.pre.runGlobalAsync('checkProtocolRegistration'))
     assert.deepEqual(Object.keys(registration).sort(), ['anubis', 'ssh', 'telnet', 'vnc', 'rdp', 'spice', 'serial', 'ftp'].sort())
     assert.ok(Object.values(registration).every(Boolean))
+  })
+  await t.test('FTP authenticates and lists a real remote directory', async () => {
+    await page.evaluate(options => window.store.addTab(options), {
+      type: 'ftp',
+      host: '127.0.0.1',
+      port: ftp.port,
+      user: TEST_USERNAME,
+      username: TEST_USERNAME,
+      password: TEST_PASSWORD,
+      title: 'FTP smoke',
+      secure: false
+    })
+    await page.locator('.session-current .sftp-remote-section').getByText(markerFile, { exact: true }).first().waitFor()
+    assert.deepEqual(ftp.errors, [])
+  })
+  await t.test('Telnet exchanges terminal input and server output over a real connection', async () => {
+    await page.evaluate(port => window.store.addTab({
+      type: 'telnet',
+      host: '127.0.0.1',
+      port,
+      title: 'Telnet smoke',
+      pane: 'terminal'
+    }), telnet.port)
+    await page.locator('.session-current').getByText('ANUBIS_TELNET_READY', { exact: false }).first().waitFor()
+    await page.locator('.session-current .xterm-helper-textarea').first().focus()
+    await page.keyboard.insertText('echo ANUBIS_TELNET_OK')
+    await page.keyboard.press('Enter')
+    await page.waitForFunction(() => document.body.innerText.includes('fixture reply: ANUBIS_TELNET_OK'))
+    assert.ok(telnet.commands.includes('echo ANUBIS_TELNET_OK'))
+    assert.deepEqual(telnet.errors, [])
   })
   await t.test('MCP starts automatically and accepts authenticated initialization', async () => {
     await page.waitForFunction(() => window.store.widgetInstances.some(w => w.widgetId === 'mcp-server'))
@@ -406,6 +446,9 @@ test('packaged Windows desktop functionality', { timeout: 180000 }, async t => {
   await app.close()
   app = undefined
   const restarted = await launch()
+  await t.test('UI-created commands, themes, triggers, profiles and bookmarks survive restart', async () => {
+    await checkUIDataPersistence(restarted)
+  })
   await t.test('bookmark data survives restart and remains decryptable', async () => {
     const saved = await restarted.evaluate(() => window.pre.runGlobalAsync(
       'dbAction', 'bookmarks', 'findOne', { _id: 'packaged-smoke-bookmark' }

@@ -98,6 +98,9 @@ exports.createWindow = async function (userConfig) {
   const port = isDev
     ? process.env.devPort || 5570
     : await getPort()
+  // Older installations cached version-only entry URLs for a year. Clear
+  // HTTP cache before loading them; keep cookies, databases and credentials.
+  await win.webContents.session.clearCache()
   const opts = `http://127.0.0.1:${port}/index.html?v=${packInfo.version}`
   // If loading the URL fails (e.g. proxy/firewall interference), show error page
   win.webContents.once('did-fail-load', (event, errorCode, errorDescription) => {

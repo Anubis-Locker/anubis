@@ -28,13 +28,14 @@
   cursor pointer
   line-height 1.8
   &.active
-    background var(--primary)
-    color var(--primary-contrast)
+    background var(--ui-hover)
+    color var(--text)
+    box-shadow inset 2px 0 0 var(--primary)
   &.current
     font-weight bold
   &:hover
-    background var(--primary)
-    color var(--primary-contrast)
+    background var(--ui-hover)
+    color var(--text)
     .list-item-apply
     .list-item-edit
     .list-item-remove

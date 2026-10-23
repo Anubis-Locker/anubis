@@ -6,6 +6,7 @@ export default function SideIcon (props) {
     className,
     title = '',
     active,
+    onClick,
     children
   } = props
   if (show === false) {
@@ -15,11 +16,16 @@ export default function SideIcon (props) {
     active
   })
   return (
-    <div
+    <button
+      type='button'
       className={cls}
       title={title}
+      aria-label={title}
+      aria-pressed={active === undefined ? undefined : !!active}
+      onClick={onClick}
     >
       {children}
-    </div>
+      <span className='sidebar-nav-label'>{title}</span>
+    </button>
   )
 }

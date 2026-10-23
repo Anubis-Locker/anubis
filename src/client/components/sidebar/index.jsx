@@ -30,7 +30,7 @@ export default function Sidebar (props) {
     isSyncingSetting,
     // expandable bookmarks/history panel
     leftSidePanelWidth,
-    // far-left icon bar (43px; 0 when hidden)
+    // responsive navigation column (0 when hidden)
     leftSideBarWidth,
     pinned,
     fileTransfers,
@@ -138,7 +138,7 @@ export default function Sidebar (props) {
         className: 'sidebar-list'
       }
   const sidebarProps = {
-    className: `sidebar type-${openedSideBar}${leftSideBarWidth === 0 ? ' collapsed' : ''}`,
+    className: `sidebar type-${openedSideBar}${leftSideBarWidth === 0 ? ' collapsed' : ''}${leftSideBarWidth > 43 ? ' sidebar-expanded' : ''}`,
     style: {
       width: leftSideBarWidth,
       height
@@ -163,7 +163,7 @@ export default function Sidebar (props) {
           openSettingSync={openSettingSync}
           openTerminalThemes={openTerminalThemes}
           openWidgetsModal={openWidgetsModal}
-          bookmarksActive={bookmarksActive}
+          bookmarksActive={bookmarksActive || openedSideBar === 'bookmarks'}
           themeActive={themeActive}
           settingActive={settingActive}
           syncActive={syncActive}
@@ -175,18 +175,18 @@ export default function Sidebar (props) {
         <SideIcon
           title={e('about')}
           active={showInfoModal}
+          onClick={openAbout}
         >
           <InfoCircleOutlined
             className='iblock font16 control-icon open-about-icon'
-            onClick={openAbout}
           />
         </SideIcon>
         <SideIcon
           title={e('hide')}
+          onClick={handleToggleSidebar}
         >
           <MenuFoldOutlined
             className='iblock font16 control-icon hide-sidebar-icon'
-            onClick={handleToggleSidebar}
           />
         </SideIcon>
         {
@@ -194,10 +194,10 @@ export default function Sidebar (props) {
             ? (
               <SideIcon
                 title={e('resetzoom')}
+                onClick={handleZoomReset}
               >
                 <AimOutlined
                   className='iblock font16 control-icon zoom-reset-icon'
-                  onClick={handleZoomReset}
                 />
               </SideIcon>
               )
@@ -210,14 +210,14 @@ export default function Sidebar (props) {
                 title={`${e('upgrading')} ${upgradePercent || 0}%`}
                 placement='right'
               >
-                <div
-                  className='control-icon-wrap'
+                <SideIcon
+                  title={e('checkForUpdate')}
+                  onClick={handleShowUpgrade}
                 >
                   <UpCircleOutlined
                     className='iblock font18 control-icon upgrade-icon'
-                    onClick={handleShowUpgrade}
                   />
-                </div>
+                </SideIcon>
               </Tooltip>
               )
             : null
