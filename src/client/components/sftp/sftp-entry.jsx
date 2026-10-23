@@ -135,9 +135,10 @@ export default class Sftp extends Component {
       return
     }
     const {
+      pid,
       port
     } = r
-    this.initData(undefined, port)
+    this.initData(pid, port)
   }
 
   directions = [

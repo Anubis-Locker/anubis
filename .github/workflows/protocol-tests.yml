@@ -9,6 +9,9 @@ on:
       - 'package.json'
       - 'package-lock.json'
       - 'src/app/server/**'
+      - 'src/client/components/sftp/sftp-entry.jsx'
+      - 'src/test/unit-ci/session-ftp-renderer.spec.js'
+      - 'src/test/unit-ci/managed-browser*.spec.js'
       - 'src/test/integration/session-loopback-acceptance.spec.js'
       - 'src/test/integration/lib/**'
   pull_request:
@@ -17,6 +20,9 @@ on:
       - 'package.json'
       - 'package-lock.json'
       - 'src/app/server/**'
+      - 'src/client/components/sftp/sftp-entry.jsx'
+      - 'src/test/unit-ci/session-ftp-renderer.spec.js'
+      - 'src/test/unit-ci/managed-browser*.spec.js'
       - 'src/test/integration/session-loopback-acceptance.spec.js'
       - 'src/test/integration/lib/**'
 
@@ -40,5 +46,11 @@ jobs:
         with:
           node-version: 24.x
       - run: npm ci --legacy-peer-deps
-      - name: Verify real SSH, SFTP, FTP and Telnet sessions
-        run: node --test --test-timeout=45000 src/test/integration/session-loopback-acceptance.spec.js
+      - name: Verify real protocols and managed browser routing
+        run: >-
+          node --test --test-timeout=45000
+          src/test/integration/session-loopback-acceptance.spec.js
+          src/test/unit-ci/session-ftp-renderer.spec.js
+          src/test/unit-ci/managed-browser.spec.js
+          src/test/unit-ci/managed-browser-rpc.spec.js
+          src/test/unit-ci/managed-browser-packaging.spec.js

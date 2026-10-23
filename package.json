@@ -1,6 +1,6 @@
 {
   "name": "anubis",
-  "version": "5.7.0",
+  "version": "5.7.1",
   "description": "Anubis-Security-Tool: terminal/ssh/sftp/telnet/serialport/RDP/VNC/Spice/ftp client (Linux, macOS, Windows).",
   "main": "app.js",
   "scripts": {

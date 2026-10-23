@@ -406,3 +406,23 @@ Separately, the isolated unsigned 5.7.0 QA artifact `A1DD3763...` passed retaine
 re-provisioning, protected same-version update and normal uninstall with a
 deliberately incompatible inherited PowerShell module path; that is bounded
 QA evidence, not a second production migration.
+
+### Managed FTP session routing correction
+
+Additional live SYSTEM gateway checks after the 5.7.0 migration confirmed SSH
+host-key confirmation and command execution, SFTP directory listing, and VNC
+framebuffer, keyboard and pointer delivery. They also exposed a separate FTP
+renderer defect: the FTP initializer discarded the returned child session ID.
+Direct desktop routing by child port masked this, but the managed browser
+requires that ID to select the correct backend. The correction passes the
+returned `pid` together with its port, without a default-session fallback.
+It requires a newly built browser-assets package and a new application release;
+the immutable 5.7.0 binaries must not be replaced.
+
+`src/test/unit-ci/session-ftp-renderer.spec.js` fails on the old initializer and
+covers both ID propagation and failed creation. The isolated
+`src/test/integration/session-loopback-acceptance.spec.js` exercises real
+SSH/SFTP, binary FTP upload/download and Telnet against private localhost
+fixtures, without the installed service, registry or original profiles.
+The `protocol-tests` workflow gates these checks and the managed browser
+transport/authentication regressions on Linux, Windows and macOS.
