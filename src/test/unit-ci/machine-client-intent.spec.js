@@ -37,7 +37,9 @@ test('machine links and help are accepted, while unsupported server/batch flags 
   }
 })
 
-test('.vv uses the canonical parser; files are local, bounded, regular and read before the workspace receives the request', async t => {
+test('.vv uses the canonical parser; files are local, bounded, regular and read before the workspace receives the request', {
+  skip: process.platform !== 'win32'
+}, async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'anubis-machine-intent-'))
   t.after(() => fs.rm(root, { recursive: true, force: true }))
   const file = path.join(root, 'console.vv')
@@ -60,12 +62,18 @@ test('.vv uses the canonical parser; files are local, bounded, regular and read 
   await assert.rejects(parse([file]), { code: 'ERR_HOST_INTENT_VV' })
   await fs.writeFile(file, Buffer.alloc(1024 * 1024 + 1))
   await assert.rejects(parse([file]), { code: 'ERR_HOST_INTENT_FILE' })
+})
+
+test('UNC, device and alternate-stream intent files are rejected on every platform', async () => {
   for (const value of ['\\\\server\\share\\console.vv', '\\\\?\\C:\\console.vv', 'C:\\console.vv:ticket.vv']) {
     await assert.rejects(parse([value]), { code: 'ERR_HOST_INTENT_FILE' })
+    await assert.rejects(parse(['-i', value, 'root@example.invalid']), { code: 'ERR_HOST_INTENT_FILE' })
   }
 })
 
-test('private keys are read by the interactive process, not by the selected workspace', async t => {
+test('private keys are read by the interactive process, not by the selected workspace', {
+  skip: process.platform !== 'win32'
+}, async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'anubis-machine-key-'))
   t.after(() => fs.rm(root, { recursive: true, force: true }))
   const file = path.join(root, 'private key')
