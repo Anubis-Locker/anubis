@@ -1,0 +1,26 @@
+name: deployment-host-fingerprint
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fingerprint:
+    runs-on: ubuntu-24.04
+    steps:
+    - name: Report the configured public deployment host fingerprints
+      env:
+        DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        test -n "$DEPLOY_KNOWN_HOSTS"
+        umask 077
+        file="$(mktemp "$RUNNER_TEMP/anubis-known-hosts.XXXXXXXX")"
+        trap 'rm -f "$file"' EXIT
+        printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$file"
+        fingerprints="$(ssh-keygen -lf "$file" -E sha256 | awk '{print $2}' | sort -u)"
+        test -n "$fingerprints"
+        printf '%s\n' "$fingerprints"
