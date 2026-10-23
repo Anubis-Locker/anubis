@@ -438,3 +438,79 @@ escaping the client directory, compares the shared bytes and imports both module
 Web consumers must copy the published `app/common` tree beside the client tree;
 they must not depend on a sibling app checkout or a manually vendored fallback.
 This packaging correction does not change the native helper or managed SDK.
+
+### Stable 5.7.2 production update acceptance (2026-10-23)
+
+Immutable `v5.7.2` at `57308fd18140668434361da4bb36e536c7e1e7e2` passed
+the complete [release workflow](https://github.com/Anubis-Locker/anubis/actions/runs/39957633743),
+including all platform builds and their packaged checks. All eight artifacts
+and `SHA256SUMS` matched GitHub content digests and the owned HTTPS mirrors.
+The actual **unsigned** stable installer was
+`anubis-5.7.2-win-x64-installer.exe`, 125120417 bytes, SHA256
+`46528457FF355C37867C969B5A9A1B7B8F9E39902A1BEE1013935D22E042AF40`.
+The native helper remains `00057E89...`, compiled with Go 1.27.3, and managed
+SDK remains 1.0.2.
+
+The renderer and browser-assets dependencies are both 5.7.2. The latter was
+built from the complete immutable client publication
+`183f7e294197a36c1fa51face82226ab08dc65e6`, without sibling-source aliases or
+vendored replacement modules. Its registry tarball SHA256 is
+`E7AC7179C2BB05FAED28109304D4FB3FE9499BA433A2B5C301477B9449453448`.
+The installed ASAR's 300 browser files plus generated version manifest matched
+the accepted published/staged bytes. Runtime version checks use
+`browser-assets/manifest.json`; the builder may omit the staging dependency's
+npm `package.json` from the final runtime.
+
+Before release, the frozen isolated 5.7.2 candidate passed protected product
+PowerShell `Prepare`/`Finish`/`Stop`/`Remove`, explicit retained-SID provisioning,
+SYSTEM MCP/native PTY, service restart, FTP/SFTP transfers, SSH and Telnet.
+This was **protected runtime QA, not execution of that candidate's NSIS
+installer**: the conservative global same-name process guard was preserved
+while production remained running. QA data was retained, the QA service and
+Program Files payload were removed, and production remained unchanged.
+Initial shared-host virtual-memory exhaustion was recorded separately; the
+accepted run had no Windows resource-exhaustion event.
+
+The published stable installer then actually updated the retained production
+5.7.0 installation using **`/S` alone**, returning zero. No migration or SID
+provisioning option was repeated. The protected package, normal no-argument
+desktop shortcut, Automatic LocalSystem service, original authorization and
+complete migration record were verified. Production still has no QA-only
+machine policy. A stale ASAR header cache interrupted the first operator's
+post-install inspection; a fresh reader completed verification **without
+rerunning setup**. Exact pre/post control-file bytes were not recovered from
+that ended operator process: independent verification instead checked retained
+schemas, original identity and private-file LastWriteTimes predating setup.
+This limitation does not weaken the separate original-user-data comparison.
+
+Against the actual upgraded SYSTEM backend through its authenticated HTTPS
+gateway, SSH host-key confirmation and command execution, FTP/SFTP directory
+listing and **196867-byte binary upload/download for each protocol**, and a
+Telnet command/response passed. Temporary fixture trust and sessions were
+removed. VNC delivered the expected real framebuffer pixels, keyboard and
+pointer events. All 14 renderer-navigation checks passed with no uncaught
+JavaScript errors or failed own-origin HTTP requests.
+
+The ordinary desktop GUI switched SYSTEM -> Root -> SYSTEM. Native PTYs
+independently proved SYSTEM/session 0 and the original Root/session 2, with no
+SYSTEM fallback for Root. All six original Root collections and the password
+field matched the protected rollback snapshot through real Root DPAPI and an
+ephemeral HMAC, including three encrypted bookmarks, 13 quick commands and two
+themes. Decrypted values and the comparison key were not persisted; the
+temporary private clone was removed.
+
+After normal GUI close, the **same remote HTTPS MCP session** executed a SYSTEM
+PTY command after **36.450 seconds**, with the same SCM process and SYSTEM
+engine/context. The original approved device identity remained online; the
+legacy user's approval was preserved. Reopening the ordinary shortcut restored
+the SYSTEM workspace. Evidence includes
+`production-update-572-verified.json`, `production-protocols-572.json`,
+`production-vnc-572.json`, `production-renderer-navigation-572.json`,
+`production-root-workspace-572.json`, `production-persistence-572.json` and
+`production-native-572-accepted.json`.
+
+This is actual stable **in-place update** acceptance, not a new fresh-install,
+uninstall, reboot/pre-logon, logoff, other-account or non-elevated UAC test.
+Windows/macOS signing, notarization, physical serial hardware and universal
+remote-device compatibility are not certified. The controlled network fixtures
+do not establish new 5.7.2 RDP/SPICE or arbitrary remote-server acceptance.
