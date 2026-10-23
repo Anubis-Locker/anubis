@@ -122,6 +122,7 @@ async function fixture (t, options = {}) {
     },
     './machine-host-entry': { cleanRuntimeEnvironment () {} },
     './machine-client-intent': require('../../app/lib/machine-client-intent'),
+    './embedded-website': require('../../app/lib/embedded-website'),
     './machine-client-connection': {
       createMachineConnection: config => createMachineConnection({
         ...config,
@@ -146,7 +147,10 @@ async function fixture (t, options = {}) {
       app,
       BrowserWindow: Window,
       WebContentsView: View,
-      ipcMain: { handle: (name, handler) => handlers.set(name, handler) },
+      ipcMain: {
+        handle: (name, handler) => handlers.set(name, handler),
+        removeHandler: name => handlers.delete(name)
+      },
       shell: { openExternal: async () => {} },
       dialog: {
         async showMessageBox (_win, value) {

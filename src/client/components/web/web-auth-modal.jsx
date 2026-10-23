@@ -18,6 +18,8 @@ export default function WebAuthModal ({ authRequest, onAuthSubmit, onAuthCancel 
     setPassword('')
   }, [onAuthCancel])
 
+  if (!authRequest) return null
+
   return (
     <Modal
       open={!!authRequest}

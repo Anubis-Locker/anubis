@@ -9,9 +9,10 @@ const { cleanRuntimeEnvironment } = require('./machine-host-entry')
 const { createMachineConnection } = require('./machine-client-connection')
 const { checkMachineUpdate, installMachineUpdate } = require('./machine-client-update')
 const { parseMachineIntent, connectionArguments, intentScript, describeIntent, quoteWindowsArgument } = require('./machine-client-intent')
+const { setupEmbeddedWebsites } = require('./embedded-website')
 
 async function startMachineClient () {
-  const { app, BrowserWindow, WebContentsView, ipcMain, shell, dialog } = require('electron')
+  const { app, BrowserWindow, WebContentsView, ipcMain, shell, dialog, session } = require('electron')
   cleanRuntimeEnvironment(process.env)
   const installDir = path.dirname(process.execPath)
   const helper = path.join(installDir, 'anubis-host.exe')
@@ -70,6 +71,7 @@ async function startMachineClient () {
     }
   })
   let view
+  let disposeWebsites
   let sessions = []
   let updateController
   const intents = []
@@ -86,6 +88,8 @@ async function startMachineClient () {
     if (!view) return
     const previous = view
     view = null
+    disposeWebsites?.()
+    disposeWebsites = null
     if (!win.isDestroyed()) win.contentView.removeChildView(previous)
     if (!previous.webContents.isDestroyed()) {
       previous.webContents.session.webRequest.onBeforeSendHeaders(null)
@@ -267,10 +271,13 @@ async function startMachineClient () {
           contextIsolation: true,
           nodeIntegration: false,
           sandbox: true,
+          webviewTag: true,
+          preload: path.resolve(__dirname, '../preload/embedded-website.js'),
           devTools: false
         }
       })
       view = next
+      disposeWebsites = setupEmbeddedWebsites({ contents: next.webContents, app, ipcMain, session })
       win.contentView.addChildView(next)
       fit()
       next.webContents.session.webRequest.onBeforeSendHeaders((details, done) => {
