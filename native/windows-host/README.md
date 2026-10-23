@@ -126,6 +126,88 @@ scratch/metadata, **not** an override for the real user profile.
 
 ## Administrative CLI
 
+### Managed Web context routing
+
+The SYSTEM engine's managed browser adapter now supports separate Windows
+contexts per authenticated gateway browser session. This does not change the
+canonical machine engine, create another public managed agent, or move passwords,
+bookmarks, DPAPI data, or browser login tokens between Windows profiles.
+
+Internal routes, authenticated by the existing private managed transport:
+
+```text
+GET  /api/machine-contexts
+  -> {supported:true,contexts:[{id:<opaque32hex>,target:"system"|"user",
+                               identity:{sid,account,sessionId}}]}
+POST /api/machine-contexts
+  body: {id:<one currently listed opaque choice>}
+  -> {selector:<opaque32hex>,context:{contextId,
+       identity:{sid,account,elevated,sessionId,pid}}}
+```
+
+Both control requests require gateway-owned
+`x-anubis-managed-session: <random32..64 lowercase hex>`. Selected HTTP and
+WebSocket requests additionally use `x-anubis-managed-context: <selector>`.
+The selector is bound to that gateway session, not a global engine switch.
+Only an absent selector means canonical SYSTEM; malformed, unknown, expired,
+cross-session, or stale explicit selectors fail closed. Control requests must
+use the canonical SYSTEM transport without a selector. Bindings expire after
+eight hours and are capped at 128.
+
+The gateway authenticates its own browser cookie/grant, strips both reserved
+headers supplied by browsers, and injects its own server-only binding/selector.
+The gateway must not expose the selector response directly as an authority
+chosen by browser headers. On switching, it closes only that browser's existing
+HTTP/WS channels, rotates/revokes its cookie while retaining the server-only
+binding ID, clears `tokenElecterm` in that tab, and reloads. Other browser
+sessions remain unchanged. MCP-only grants cannot list/select contexts; `/mcp`
+rejects context selectors and remains SYSTEM.
+
+The adapter lists only policy-authorized logged-on Windows users. Selection and
+every selected request resolve through the authenticated native broker, checking
+current protected SID policy, current WTS account/session and logon SID, exact
+retained context/process, and authenticated runtime control pipe. Live proxied
+HTTP/WS streams are revalidated every two seconds and closed on authorization
+loss; short requests are checked before forwarding. Explicit stale selections
+never launch replacements or fall back to SYSTEM. A new explicit selection can
+launch the fixed headless user worker. Its actual target token supplies its
+environment/profile; the exact duplicated validated token is used for launch,
+not a second WTS query that could race session reuse.
+
+Only the SYSTEM server retains the selected endpoint port/private proof. It
+forwards to fixed `127.0.0.1` with server-generated private authentication;
+credentials, ports, native tokens, and control paths are not included in public
+context responses. User desktop authentication remains the selected worker's
+own password/login state. The native toolbar's existing transport is unchanged.
+The chooser script `/_anubis/context-ui.js` is included only with a valid gateway
+binding and supported native router. The SYSTEM proxy injects the same trusted
+script into bounded selected-user root/index HTML, including its own login page;
+no shared renderer or user-profile edits are needed.
+
+Use `broker-client --stdio` for the guarded native broker protocol:
+
+* `list-contexts` returns the canonical machine's credential-free descriptor and
+  authorized WTS sessions with private logon SID bindings.
+* `launch-context` optionally accepts paired `accountSid`/`logonSid` user guards.
+  Existing toolbar requests without these fields remain compatible. A worker
+  from a previous logon in a reused session is stopped before a fresh launch.
+* `resolve-context` requires an exact `contextId`; user targets also require
+  `sessionId`, `accountSid`, and `logonSid`. It only describes that retained
+  worker and never starts an engine. SYSTEM resolution requires the current
+  canonical machine context ID.
+
+No broker endpoint accepts a general executable, command, profile path, or
+credentials. This protocol requires rebuilding/updating the registered service;
+an older host rejects the new operations explicitly, not a simulated context
+list. No production service or allowlist is changed by implementing the adapter.
+Windows-token launch acceptance must use the guarded isolated QA procedures,
+with explicitly provisioned user SIDs; tests must not expand production policy.
+Real HTTP/WS unit fixtures verify routing, independent passwords/tokens,
+sanitization, cross-browser isolation, binary/early frames, and revocation using
+a controlled broker boundary. Native tests cover strict request guards and
+retained-context/logon matching; they do not substitute for full SCM/WTS runtime
+acceptance of the newly integrated guarded route.
+
 ### Protected downloaded-installer staging
 
 An already elevated administrator runs the **installed** helper:

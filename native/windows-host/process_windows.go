@@ -142,6 +142,13 @@ func (c config) launch(ctx context.Context, machine bool, sessionID *uint32) (*c
 		return nil, err
 	}
 	defer token.Close()
+	return c.launchToken(ctx, machine, token, expected)
+}
+
+func (c config) launchToken(ctx context.Context, machine bool, token windows.Token, expected identity) (*child, error) {
+	if machine != (expected.SID == "S-1-5-18" && expected.SessionID == 0) {
+		return nil, errors.New("launch token does not match machine/user role")
+	}
 	id, err := randomID()
 	if err != nil {
 		return nil, err
@@ -162,7 +169,7 @@ func (c config) launch(ctx context.Context, machine bool, sessionID *uint32) (*c
 	if err := secureMkdir(dir); err != nil {
 		return nil, err
 	}
-	if sessionID != nil {
+	if !machine {
 		if err := applyACL(dir, adminSDDL+"(A;OICI;GRGX;;;"+expected.SID+")"); err != nil {
 			return nil, err
 		}
@@ -171,7 +178,7 @@ func (c config) launch(ctx context.Context, machine bool, sessionID *uint32) (*c
 	if err := secureMkdir(stateDir); err != nil {
 		return nil, err
 	}
-	if sessionID != nil {
+	if !machine {
 		if err := applyACL(stateDir, adminSDDL+"(A;OICI;FA;;;"+expected.SID+")"); err != nil {
 			return nil, err
 		}
@@ -187,7 +194,7 @@ func (c config) launch(ctx context.Context, machine bool, sessionID *uint32) (*c
 		if err := os.WriteFile(path, nil, 0600); err != nil {
 			return nil, err
 		}
-		if sessionID != nil {
+		if !machine {
 			if err := applyACL(path, adminSDDL+"(A;;GRGW;;;"+expected.SID+")"); err != nil {
 				return nil, err
 			}

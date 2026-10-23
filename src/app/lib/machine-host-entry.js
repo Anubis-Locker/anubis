@@ -35,7 +35,8 @@ function cleanRuntimeEnvironment (env) {
   const blocked = new Set([
     'node_options', 'node_path', 'node_test', 'node_env', 'electron_run_as_node',
     'data_path', 'electermhost', 'electermport', 'tokenelecterm', 'requireauth',
-    'anubis_managed_transport_secret', 'anubis_managed_admin_token', 'admin_token'
+    'anubis_managed_transport_secret', 'anubis_managed_admin_token', 'admin_token',
+    'anubis_machine_context_service'
   ])
   for (const key of Object.keys(env)) {
     if (blocked.has(key.toLowerCase())) delete env[key]
@@ -165,6 +166,11 @@ async function startMachineHost (invocation) {
     }
     const identity = validateRuntimeIdentity(invocation.mode, nativeCommand(helper, ['identity']))
     cleanRuntimeEnvironment(process.env)
+    if (invocation.mode === 'system') {
+      const service = /^\\\\\.\\pipe\\(AnubisHost(?:-QA-[A-Za-z0-9-]{1,40})?)-context-[a-f0-9]{32}$/.exec(invocation.controlPipe)
+      if (!service) throw failure('ERR_MACHINE_RUNTIME_CONTRACT')
+      process.env.ANUBIS_MACHINE_CONTEXT_SERVICE = service[1]
+    }
     const paths = runtimePaths(invocation, app.getPath('appData'), require('../common/brand').data.dirName)
     fs.mkdirSync(paths.userData, { recursive: true })
     app.setPath('appData', paths.appData)

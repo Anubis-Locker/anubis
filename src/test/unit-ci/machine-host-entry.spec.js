@@ -35,6 +35,7 @@ test('headless environment cannot redirect bind/auth/profile or expose controlle
     ANUBIS_MANAGED_ADMIN_TOKEN: 'controller-secret',
     admin_TOKEN: 'controller-secret',
     Anubis_Managed_Transport_Secret: 'inherited-proof',
+    ANUBIS_MACHINE_CONTEXT_SERVICE: 'AnubisHost-QA-forged-parent',
     ElectermHost: '0.0.0.0',
     ELECTERMPORT: '40000',
     TokenElecterm: 'inherited-token',

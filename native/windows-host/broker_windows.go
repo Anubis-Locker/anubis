@@ -19,10 +19,13 @@ import (
 )
 
 type request struct {
-	Version   int     `json:"version"`
-	Operation string  `json:"operation"`
-	Target    string  `json:"target,omitempty"`
-	SessionID *uint32 `json:"sessionId,omitempty"`
+	Version    int     `json:"version"`
+	Operation  string  `json:"operation"`
+	Target     string  `json:"target,omitempty"`
+	SessionID  *uint32 `json:"sessionId,omitempty"`
+	AccountSID string  `json:"accountSid,omitempty"`
+	LogonSID   string  `json:"logonSid,omitempty"`
+	ContextID  string  `json:"contextId,omitempty"`
 }
 
 type response struct {
@@ -117,17 +120,32 @@ func decodeRequest(raw []byte) (request, error) {
 		return req, errors.New("unsupported broker version")
 	}
 	switch req.Operation {
-	case "identity", "list-sessions":
-		if req.Target != "" || req.SessionID != nil {
+	case "identity", "list-sessions", "list-contexts":
+		if req.Target != "" || req.SessionID != nil || req.AccountSID != "" || req.LogonSID != "" || req.ContextID != "" {
 			return req, errors.New("unexpected target/sessionId")
 		}
-	case "launch-context":
+	case "launch-context", "resolve-context":
 		if req.Target != "system" && req.Target != "user" {
 			return req, errors.New("target must be system or user")
 		}
 		if (req.Target == "system" && req.SessionID != nil) ||
 			(req.Target == "user" && (req.SessionID == nil || *req.SessionID == 0)) {
 			return req, errors.New("user target requires a nonzero sessionId; system target forbids sessionId")
+		}
+		if req.Target == "system" && (req.AccountSID != "" || req.LogonSID != "") {
+			return req, errors.New("SYSTEM target forbids user identity guards")
+		}
+		if req.AccountSID != "" || req.LogonSID != "" || req.Operation == "resolve-context" && req.Target == "user" {
+			if !accountSIDPattern.MatchString(req.AccountSID) || !logonSIDPattern.MatchString(req.LogonSID) {
+				return req, errors.New("user guard requires canonical accountSid and logonSid")
+			}
+		}
+		if req.Operation == "resolve-context" {
+			if !contextIDPattern.MatchString(req.ContextID) {
+				return req, errors.New("resolve-context requires exact contextId")
+			}
+		} else if req.ContextID != "" {
+			return req, errors.New("launch-context forbids contextId")
 		}
 	default:
 		return req, errors.New("unsupported broker operation")
@@ -161,7 +179,9 @@ func (b *broker) dispatch(ctx context.Context, req request) (any, error) {
 		}{host, machine}, nil
 	case "list-sessions":
 		return sessions()
-	case "launch-context":
+	case "list-contexts":
+		return b.listContexts()
+	case "launch-context", "resolve-context":
 		b.mu.Lock()
 		defer b.mu.Unlock()
 		if b.stopping {
@@ -175,21 +195,58 @@ func (b *broker) dispatch(ctx context.Context, req request) (any, error) {
 			case <-b.machine.exit:
 				return nil, errors.New("machine engine exited; recovery in progress")
 			default:
+				if req.Operation == "resolve-context" {
+					if req.ContextID != b.machine.Info.ContextID {
+						return nil, errors.New("machine context was replaced")
+					}
+					if err := b.machine.describe(ctx); err != nil {
+						return nil, err
+					}
+				}
 				return b.machine.Info, nil
 			}
 		}
-		token, expected, err := primaryToken(req.SessionID, b.config.AllowedSIDs)
+		policy, err := b.contextPolicy()
 		if err != nil {
 			return nil, err
 		}
-		token.Close()
+		token, expected, err := primaryToken(req.SessionID, policy.AllowedSIDs)
+		if err != nil {
+			return nil, err
+		}
+		defer token.Close()
+		logon, err := logonSID(token)
+		if err != nil || logon == "" {
+			return nil, errors.Join(errors.New("logged-on user token has no logon SID"), err)
+		}
+		if req.AccountSID != "" && (req.AccountSID != expected.SID || req.LogonSID != logon) {
+			return nil, errors.New("selected Windows account or logon session changed")
+		}
+		if req.Operation == "resolve-context" {
+			ch, err := retainedContext(b.contexts, req.ContextID, expected, logon)
+			if err != nil {
+				return nil, err
+			}
+			if err := ch.describe(ctx); err != nil {
+				return nil, err
+			}
+			return ch.Info, nil
+		}
 		for id, ch := range b.contexts {
 			select {
 			case <-ch.exit:
 				ch.close()
 				delete(b.contexts, id)
 			default:
-				if ch.Info.Identity.SID == expected.SID && ch.Info.Identity.SessionID == expected.SessionID {
+				if ch.Info.Identity.SessionID == expected.SessionID &&
+					!matchingContext(ch, expected, logon) {
+					delete(b.contexts, id)
+					if err := ch.stop(); err != nil {
+						return nil, fmt.Errorf("stop worker from previous Windows logon: %w", err)
+					}
+					continue
+				}
+				if matchingContext(ch, expected, logon) {
 					return ch.Info, nil
 				}
 			}
@@ -197,7 +254,7 @@ func (b *broker) dispatch(ctx context.Context, req request) (any, error) {
 		if len(b.contexts) >= 8 {
 			return nil, errors.New("maximum 8 live context workers reached")
 		}
-		ch, err := b.config.launch(ctx, false, req.SessionID)
+		ch, err := policy.launchToken(ctx, false, token, expected)
 		if err != nil {
 			return nil, err
 		}

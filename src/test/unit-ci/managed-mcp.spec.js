@@ -51,6 +51,10 @@ test('managed MCP streams to the actual local endpoint without exposing or accep
     'content-type': 'application/octet-stream'
   }
   const payload = Buffer.alloc(512 * 1024)
+  assert.equal((await fetch(origin, {
+    headers: { ...headers, 'x-anubis-managed-context': 'b'.repeat(32) }
+  })).status, 403)
+  assert.equal(calls.length, 0)
   for (let i = 0; i < payload.length; i++) payload[i] = i % 256
   const post = await fetch(origin, { method: 'POST', headers, body: payload })
   assert.equal(post.status, 200)

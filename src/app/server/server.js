@@ -21,6 +21,23 @@ if (managedRpc) {
 appDec(app)
 
 if (managedRpc) {
+  let contexts
+  if (process.env.ANUBIS_MACHINE_CONTEXT_SERVICE) {
+    const { createManagedContexts, nativeContextBridge } = require('./managed-contexts')
+    contexts = createManagedContexts({
+      secret: process.env.ANUBIS_MANAGED_TRANSPORT_SECRET,
+      bridge: nativeContextBridge(process.env.ANUBIS_MACHINE_CONTEXT_SERVICE)
+    })
+    app.use(contexts.middleware)
+    process.once('disconnect', () => contexts.close())
+    process.once('exit', () => contexts.close())
+  } else {
+    app.all('/api/machine-contexts', (req, res) => res.status(503).json({ error: 'Windows machine contexts are not available' }))
+    app.use((req, res, next) => {
+      if (Object.hasOwn(req.headers, 'x-anubis-managed-context')) return res.status(403).json({ error: 'Windows context routing is not available' })
+      next()
+    })
+  }
   const { initManagedBrowser } = require('./managed-browser')
   const browser = initManagedBrowser(app, {
     secret: process.env.ANUBIS_MANAGED_TRANSPORT_SECRET,

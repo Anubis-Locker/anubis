@@ -100,7 +100,7 @@ function initManagedBrowser (app, {
         }
         delete globals.config
         delete globals.requirePassword
-        return res.type('html').send(`<!doctype html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Managed Anubis desktop</title><link rel="stylesheet" href="/css/style-${version}.css"></head><body><div role="status" id="managed-connectivity">Managed connectivity &mdash; authenticated remote desktop access</div><div id="container"></div><style id="theme-css"></style><style id="custom-css"></style><script>window.et=${escapeJson(globals)};${token ? `localStorage.setItem('tokenElecterm',${escapeJson(token)});` : ''}</script><script type="module" src="/js/basic-${version}.js"></script></body></html>`)
+        return res.type('html').send(`<!doctype html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Managed Anubis desktop</title><link rel="stylesheet" href="/css/style-${version}.css">${req.managedContextUi ? '<script src="/_anubis/context-ui.js" defer></script>' : ''}</head><body><div role="status" id="managed-connectivity">Managed connectivity &mdash; authenticated remote desktop access</div><div id="container"></div><style id="theme-css"></style><style id="custom-css"></style><script>window.et=${escapeJson(globals)};${token ? `localStorage.setItem('tokenElecterm',${escapeJson(token)});` : ''}</script><script type="module" src="/js/basic-${version}.js"></script></body></html>`)
       }
       if (req.method === 'POST' && pathname === '/api/login') {
         if (now() - loginWindow >= 60000) {

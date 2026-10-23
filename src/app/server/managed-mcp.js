@@ -10,6 +10,9 @@ function createManagedMcpProxy ({ secret, rpc, log = require('../common/log') })
     if (!sameSecret(req.headers[HEADER], secret)) {
       return res.status(403).json({ error: 'Managed transport authentication required' })
     }
+    if (Object.hasOwn(req.headers, 'x-anubis-managed-context')) {
+      return res.status(403).json({ error: 'Managed MCP is fixed to the SYSTEM context' })
+    }
     if (!['GET', 'POST', 'DELETE'].includes(req.method)) {
       return res.status(405).json({ error: 'Unsupported MCP method' })
     }
