@@ -102,7 +102,7 @@
   },
   "dependencies": {
     "@ai-security-tool/managed-access": "1.0.2",
-    "@ai-security-tool/anubis-browser-assets": "5.6.11",
+    "@ai-security-tool/anubis-browser-assets": "5.7.2",
     "@ai-security-tool/ftp-srv": "^1.0.6",
     "@ai-security-tool/locales": "2.3.34",
     "@ai-security-tool/nedb": "2.0.0",
