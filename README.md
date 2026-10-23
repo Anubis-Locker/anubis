@@ -219,6 +219,35 @@ inaccessible when the token is missing. `/api/installs` returns the latest repor
 per installation, not remote-access passwords. Storage failures return an error
 instead of acknowledging a report that was not saved.
 
+The administrator inventory is available at
+`https://api.anubis.locker/admin` (or `/admin` on your management API host).
+Deploy `services\management-dashboard.html` alongside `management-api.js`.
+Sign in using the server's management administrator token, not a desktop MCP
+token. The dashboard keeps this token only in tab memory and refreshes every
+10 seconds. It lists the last report for each installation and opens its
+filtered error/report history; `GET /api/reports?installId=<id>&limit=50`
+requires the same administrator authentication.
+
+This inventory is **not a remote-control gateway**. An installation ID identifies
+an application profile, so test profiles and multiple profiles on one PC produce
+separate entries. Desktop 5.6.11 reports at startup; its last report must not be
+presented as live online status. It does not publish a remote Web endpoint or
+upload SSH/RDP/VNC/MCP passwords. If a reporting component explicitly supplies
+`meta.connection.webUrl`, the dashboard can display an HTTPS address under
+`*.anubis.locker`, without embedded credentials or query parameters, and labels
+it as unverified. A working authenticated Web companion and reverse tunnel are
+still required for remote browser access. No install/update/restart commands are
+dispatched by this read-only inventory.
+
+The login uses the existing `ADMIN_TOKEN` in the `anubis-mgmt-api` server
+service configuration; a token for another management host is not reused.
+Client reports currently have no per-device enrollment authentication, so
+reported identities, fields and addresses are not proof of machine ownership.
+Run the focused API/browser checks with
+`node --test src/test/unit-ci/management-api.spec.js src/test/integration/management-dashboard.spec.js`.
+The browser check uses the declared Playwright dependency and its Chromium
+browser installation.
+
 The versioned release receiver is `services\release-api.js`, with no Go or npm
 runtime dependencies. Configure `ANUBIS_WEBHOOK_SECRET`, `ANUBIS_RELEASE_PATH`
 (`/github-anubis-api/<existing-path>`), `ANUBIS_RELEASE_JSON` and

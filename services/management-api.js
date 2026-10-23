@@ -11,6 +11,9 @@ function json (res, status, body) {
   res.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
     'Content-Length': Buffer.byteLength(data),
+    'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff',
+    'Referrer-Policy': 'no-referrer',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Access-Control-Allow-Methods': 'GET,POST,OPTIONS'
@@ -40,6 +43,19 @@ function createServer ({
   dataDir = process.env.DATA_DIR || '/var/lib/anubis-mgmt',
   adminToken = process.env.ADMIN_TOKEN || ''
 } = {}) {
+  const dashboard = fs.readFileSync(path.join(__dirname, 'management-dashboard.html'), 'utf8').replace(/\r\n?/g, '\n')
+  const hashes = tag => [...dashboard.matchAll(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`, 'g'))]
+    .map(match => `'sha256-${crypto.createHash('sha256').update(match[1]).digest('base64')}'`)
+    .join(' ')
+  const dashboardPolicy = [
+    "default-src 'none'",
+    `script-src ${hashes('script')}`,
+    `style-src ${hashes('style')}`,
+    "connect-src 'self'",
+    "base-uri 'none'",
+    "form-action 'none'",
+    "frame-ancestors 'none'"
+  ].join('; ')
   fs.mkdirSync(dataDir, { recursive: true })
   const reportsFile = path.join(dataDir, 'reports.jsonl')
   fs.closeSync(fs.openSync(reportsFile, 'a', 0o600))
@@ -57,6 +73,17 @@ function createServer ({
       const url = new URL(req.url, 'http://localhost')
       const route = url.pathname
       if (req.method === 'OPTIONS') return json(res, 204, {})
+      if (req.method === 'GET' && ['/admin', '/admin/'].includes(route)) {
+        res.writeHead(200, {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Content-Length': Buffer.byteLength(dashboard),
+          'Cache-Control': 'no-store',
+          'Content-Security-Policy': dashboardPolicy,
+          'X-Content-Type-Options': 'nosniff',
+          'Referrer-Policy': 'no-referrer'
+        })
+        return res.end(dashboard)
+      }
       if (req.method === 'GET' && (route === '/' || route === '/health')) {
         return json(res, 200, { status: 'ok', service: 'anubis-mgmt-api' })
       }
@@ -103,7 +130,12 @@ function createServer ({
         if (!Number.isSafeInteger(limit) || limit < 1 || limit > 2000) {
           return json(res, 400, { error: 'limit must be an integer between 1 and 2000' })
         }
-        return json(res, 200, { reports: all.slice(0, limit) })
+        const installId = url.searchParams.get('installId')
+        if (installId !== null && (!installId.trim() || installId.length > 128)) {
+          return json(res, 400, { error: 'installId must be a nonempty string of at most 128 characters' })
+        }
+        const matching = installId === null ? all : all.filter(report => report.installId === installId)
+        return json(res, 200, { reports: matching.slice(0, limit) })
       }
       return json(res, 404, { error: 'not found' })
     } catch (error) {

@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Anubis-Security-Tool | Installations</title>
+<style>
+:root { color-scheme: dark; font: 14px system-ui, sans-serif; background: #101010; color: #eee; }
+body { max-width: 1440px; margin: auto; padding: 24px; }
+h1 { font-size: 22px; } h2 { font-size: 18px; }
+header, .toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+header { justify-content: space-between; }
+section { background: #1b1b1b; border: 1px solid #393939; border-radius: 8px; padding: 20px; margin-top: 20px; }
+button, input { font: inherit; color: inherit; background: #272727; border: 1px solid #555; border-radius: 5px; padding: 8px 12px; }
+button { cursor: pointer; } button:disabled { opacity: .5; cursor: wait; }
+input { width: min(400px, 80%); }
+label { display: block; margin: 12px 0; }
+.muted { color: #bbb; } #message { min-height: 1.5em; } .error { color: #ffaaaa; }
+.table { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; }
+th, td { padding: 12px 10px; text-align: left; border-bottom: 1px solid #393939; vertical-align: top; }
+th { white-space: nowrap; }
+code, pre { font-family: ui-monospace, monospace; overflow-wrap: anywhere; }
+pre { white-space: pre-wrap; background: #101010; padding: 12px; }
+small { display: block; margin-top: 6px; color: #bbb; }
+[hidden] { display: none !important; }
+a { color: #9ccaff; }
+</style>
+</head>
+<body>
+<header><h1>Anubis-Security-Tool</h1><span class="muted">Installation inventory</span></header>
+<p id="message" role="status" aria-live="polite"></p>
+<section id="login">
+<h2>Administrator sign-in</h2>
+<form id="login-form">
+<label for="token">Management API administrator token</label>
+<input id="token" name="token" type="password" required autocomplete="off" spellcheck="false">
+<button id="sign-in" type="submit">Sign in</button>
+</form>
+<p class="muted">The token stays in memory in this tab. It is not saved in browser storage or included in links.</p>
+</section>
+<main id="inventory" hidden>
+<section>
+<div class="toolbar">
+<h2>Installations: <span id="count">0</span></h2>
+<button id="refresh" type="button">Refresh</button>
+<button id="sign-out" type="button">Sign out</button>
+<span id="updated" class="muted"></span>
+</div>
+<p class="muted">An installation ID identifies an application profile, not necessarily a unique PC. Version 5.6.11 sends one report at startup, not a live presence signal. Recent reports do not prove that a machine is online or remotely accessible.</p>
+<div class="table">
+<table>
+<thead><tr><th>Installation ID</th><th>Application / version</th><th>Platform</th><th>Last report</th><th>Remote access</th><th>History</th></tr></thead>
+<tbody id="rows"></tbody>
+</table>
+</div>
+<p id="empty" hidden>No installations have reported to this server.</p>
+</section>
+<section id="history" hidden>
+<div class="toolbar"><h2 id="history-title"></h2><button id="close-history" type="button">Close history</button></div>
+<p class="muted">Up to 50 latest reports for the selected installation.</p>
+<div id="reports"></div>
+</section>
+</main>
+<script>
+'use strict'
+
+const element = id => document.getElementById(id)
+let token = ''
+let generation = 0
+let timer
+let controller
+let selected = ''
+
+function message (text, failed = false) {
+  element('message').textContent = text
+  element('message').className = failed ? 'error' : ''
+}
+
+function text (parent, tag, value) {
+  const child = document.createElement(tag)
+  child.textContent = String(value ?? '')
+  parent.append(child)
+  return child
+}
+
+function timestamp (value) {
+  const date = new Date(value)
+  return Number.isFinite(date.getTime()) ? date.toLocaleString() : 'Not reported'
+}
+
+function signOut () {
+  generation++
+  token = ''
+  selected = ''
+  clearTimeout(timer)
+  controller?.abort()
+  element('token').value = ''
+  element('rows').replaceChildren()
+  element('reports').replaceChildren()
+  element('count').textContent = '0'
+  element('updated').textContent = ''
+  element('history-title').textContent = ''
+  element('inventory').hidden = true
+  element('history').hidden = true
+  element('login').hidden = false
+  element('sign-in').disabled = false
+  element('refresh').disabled = false
+}
+
+async function request (route, session, signal) {
+  const response = await fetch(route, {
+    headers: { Authorization: 'Bearer ' + token },
+    cache: 'no-store',
+    redirect: 'error',
+    signal: signal || AbortSignal.timeout(10000)
+  })
+  if (session !== generation) return
+  if (response.status === 401) {
+    signOut()
+    message('Administrator token rejected. Sign in again.', true)
+    return
+  }
+  if (!response.ok) throw new Error('Management API returned HTTP ' + response.status)
+  return response.json()
+}
+
+function access (cell, report) {
+  const value = report.meta?.connection?.webUrl
+  if (typeof value !== 'string') {
+    text(cell, 'span', 'No Web address reported')
+    text(cell, 'small', 'Installing the desktop client alone does not publish a remote Web endpoint.')
+    return
+  }
+  let url
+  try {
+    url = new URL(value)
+  } catch {
+    text(cell, 'span', 'Invalid reported Web address')
+    return
+  }
+  if (url.protocol !== 'https:' || !url.hostname.endsWith('.anubis.locker') ||
+      url.username || url.password || url.search || url.hash || url.port) {
+    text(cell, 'span', 'Web address outside the permitted HTTPS domain')
+    return
+  }
+  const link = text(cell, 'a', url.href)
+  link.href = url.href
+  link.target = '_blank'
+  link.rel = 'noopener noreferrer'
+  text(cell, 'small', 'Address reported by the client; reachability and authentication are not verified.')
+}
+
+async function showHistory (installId) {
+  const session = generation
+  selected = installId
+  element('history').hidden = false
+  element('history-title').textContent = 'Reports: ' + installId
+  element('reports').replaceChildren()
+  text(element('reports'), 'p', 'Loading reports...')
+  try {
+    const data = await request('/api/reports?limit=50&installId=' + encodeURIComponent(installId), session)
+    if (!data || session !== generation || selected !== installId) return
+    if (!Array.isArray(data.reports)) throw new Error('Invalid report history response')
+    element('reports').replaceChildren()
+    if (!data.reports.length) text(element('reports'), 'p', 'No reports.')
+    for (const report of data.reports) {
+      const entry = text(element('reports'), 'article', '')
+      text(entry, 'h3', timestamp(report.receivedAt) + ' | ' + report.type)
+      if (report.message) text(entry, 'pre', report.message)
+      if (report.stack) text(entry, 'pre', report.stack)
+    }
+  } catch (error) {
+    if (session !== generation || selected !== installId) return
+    element('reports').replaceChildren()
+    text(element('reports'), 'p', 'Unable to load history: ' + error.message).className = 'error'
+  }
+}
+
+function render (installs) {
+  element('rows').replaceChildren()
+  element('count').textContent = installs.length
+  element('empty').hidden = installs.length !== 0
+  for (const report of installs) {
+    const row = text(element('rows'), 'tr', '')
+    text(text(row, 'td', ''), 'code', report.installId)
+    const application = text(row, 'td', report.app)
+    text(application, 'small', report.version || 'Version not reported')
+    const platform = text(row, 'td', report.platform || 'Not reported')
+    text(platform, 'small', report.arch)
+    const last = text(row, 'td', timestamp(report.receivedAt))
+    text(last, 'small', report.type)
+    if (report.type === 'error') last.className = 'error'
+    access(text(row, 'td', ''), report)
+    const button = text(text(row, 'td', ''), 'button', 'Reports')
+    button.type = 'button'
+    button.addEventListener('click', () => showHistory(report.installId))
+  }
+}
+
+async function refresh () {
+  const session = generation
+  clearTimeout(timer)
+  controller?.abort()
+  const pending = new AbortController()
+  controller = pending
+  const timeout = setTimeout(() => pending.abort(), 10000)
+  element('refresh').disabled = true
+  element('sign-in').disabled = true
+  try {
+    const data = await request('/api/installs', session, pending.signal)
+    if (!data || session !== generation) return
+    if (!Array.isArray(data.installs)) throw new Error('Invalid installation inventory response')
+    render(data.installs)
+    element('token').value = ''
+    element('login').hidden = true
+    element('inventory').hidden = false
+    element('updated').textContent = 'Updated: ' + new Date().toLocaleTimeString()
+    message('')
+  } catch (error) {
+    if (session === generation) message('Unable to refresh inventory: ' + error.message, true)
+  } finally {
+    clearTimeout(timeout)
+    if (session === generation) {
+      element('refresh').disabled = false
+      element('sign-in').disabled = false
+      if (token) timer = setTimeout(refresh, 10000)
+    }
+  }
+}
+
+element('login-form').addEventListener('submit', event => {
+  event.preventDefault()
+  generation++
+  token = element('token').value
+  refresh()
+})
+element('refresh').addEventListener('click', refresh)
+element('sign-out').addEventListener('click', () => {
+  signOut()
+  message('Signed out.')
+})
+element('close-history').addEventListener('click', () => {
+  selected = ''
+  element('history').hidden = true
+  element('reports').replaceChildren()
+})
+</script>
+</body>
+</html>

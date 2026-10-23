@@ -3,6 +3,7 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
+const crypto = require('node:crypto')
 const { createServer } = require('../../../services/management-api')
 
 async function fixture (t, options = {}) {
@@ -50,6 +51,34 @@ test('management requires the administrator token for install lists and report h
   }
 })
 
+test('management serves a private-data-free login shell with hashed script and style policies', async t => {
+  const f = await fixture(t)
+  for (const route of ['/admin', '/admin/']) {
+    const response = await f.request(route)
+    assert.equal(response.status, 200)
+    assert.match(response.headers.get('content-type'), /^text\/html/)
+    assert.equal(response.headers.get('cache-control'), 'no-store')
+    assert.equal(response.headers.get('x-content-type-options'), 'nosniff')
+    assert.equal(response.headers.get('referrer-policy'), 'no-referrer')
+    const html = await response.text()
+    assert.ok(!html.includes('\r'))
+    assert.ok(!html.includes('unit-management-test-token'))
+    const policy = response.headers.get('content-security-policy')
+    assert.match(policy, /frame-ancestors 'none'/)
+    assert.match(policy, /connect-src 'self'/)
+    assert.ok(!policy.includes('unsafe-inline'))
+    for (const tag of ['script', 'style']) {
+      const source = html.match(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`))[1]
+      const hash = crypto.createHash('sha256').update(source).digest('base64')
+      assert.ok(policy.includes(`'sha256-${hash}'`))
+    }
+  }
+  assert.equal((await f.request('/api/installs')).status, 401)
+  const response = await f.request('/api/installs', { headers: f.admin })
+  assert.equal(response.headers.get('cache-control'), 'no-store')
+  assert.deepEqual(await response.json(), { installs: [] })
+})
+
 test('missing administrator configuration never exposes report history', async t => {
   const f = await fixture(t, { adminToken: '' })
   for (const route of ['/api/installs', '/api/reports']) {
@@ -71,6 +100,23 @@ test('management lists one latest state per installation and retains full histor
   assert.equal(history.reports.length, 3)
   assert.ok(history.reports.some(item => item.id === original.id))
   assert.equal((await (await f.request('/api/reports?limit=1', { headers: f.admin })).json()).reports.length, 1)
+})
+
+test('management filters history by exact installation before applying the limit', async t => {
+  const f = await fixture(t)
+  await f.report({ installId: 'qa/selected & one', message: 'selected first' })
+  await f.report({ installId: 'qa/selected & one', message: 'selected latest' })
+  await f.report({ installId: 'qa-unrelated', message: 'not selected' })
+  const query = '/api/reports?limit=1&installId=' + encodeURIComponent('qa/selected & one')
+  assert.equal((await f.request(query)).status, 401)
+  const response = await f.request(query, { headers: f.admin })
+  assert.deepEqual((await response.json()).reports.map(report => report.message), ['selected latest'])
+  const missing = await f.request('/api/reports?installId=not-registered', { headers: f.admin })
+  assert.deepEqual(await missing.json(), { reports: [] })
+  for (const value of ['', ' ', 'x'.repeat(129)]) {
+    const invalid = await f.request('/api/reports?installId=' + encodeURIComponent(value), { headers: f.admin })
+    assert.equal(invalid.status, 400)
+  }
 })
 
 test('management rejects malformed reports and invalid history limits', async t => {
