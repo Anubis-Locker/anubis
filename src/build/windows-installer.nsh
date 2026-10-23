@@ -2,8 +2,54 @@
 ; Start-Process returns to the updater; cancelling UAC never creates a process.
 !include "LogicLib.nsh"
 !include "FileFunc.nsh"
+!define /ifndef ANUBIS_MACHINE_SCRIPT "${__FILEDIR__}\windows-machine-install.ps1"
+!define /ifndef ANUBIS_MACHINE_LEAF "Anubis-Security-Tool"
+!define ANUBIS_MACHINE_SUPPORT "${__FILEDIR__}"
+
+!ifmacrondef AnubisMachineAction
+!macro AnubisMachineAction ACTION
+  InitPluginsDir
+  File /oname=$PLUGINSDIR\windows-machine-install.ps1 "${ANUBIS_MACHINE_SCRIPT}"
+  File /oname=$PLUGINSDIR\windows-user-migration.ps1 "${ANUBIS_MACHINE_SUPPORT}\windows-user-migration.ps1"
+  File /oname=$PLUGINSDIR\windows-user-migration.cs "${ANUBIS_MACHINE_SUPPORT}\windows-user-migration.cs"
+  !ifndef BUILD_UNINSTALLER
+    ClearErrors
+    FileOpen $R3 "$PLUGINSDIR\allowed-user-sids.txt" w
+    FileWrite $R3 "$AnubisAllowedUserSids"
+    FileClose $R3
+    ${If} ${Errors}
+      SetErrorLevel 5
+      StrCpy $AnubisMessage "Cannot stage explicit user authorization. Setup stopped. Exit code: 5."
+      Call AnubisFail
+    ${EndIf}
+    nsExec::ExecToLog '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\windows-machine-install.ps1" -Action ${ACTION} -InstallDir "$INSTDIR" -SidListFile "$PLUGINSDIR\allowed-user-sids.txt" -MigrationRequested "$AnubisMigratePerUser"'
+  !else
+    nsExec::ExecToLog '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\windows-machine-install.ps1" -Action ${ACTION} -InstallDir "$INSTDIR"'
+  !endif
+  Pop $R0
+  ${If} $R0 != 0
+    SetErrorLevel 5
+    !ifndef BUILD_UNINSTALLER
+      StrCpy $AnubisMessage "Machine service ${ACTION} failed. Setup is incomplete; profiles and host data were retained. Exit code: 5."
+      Call AnubisFail
+    !else
+      MessageBox MB_OK|MB_ICONSTOP "Machine service ${ACTION} failed. Uninstall stopped; profiles and host data were retained. Exit code: 5." /SD IDOK
+    !endif
+    Quit
+  ${EndIf}
+!macroend
+!endif
 
 !macro customHeader
+  !ifdef APP_32
+    !error "The native machine installer supports x64 only; use standalone archives for ia32."
+  !endif
+  !ifdef APP_ARM64
+    !error "The native machine installer supports x64 only; use standalone archives for ARM64."
+  !endif
+  !ifdef BUILD_UNINSTALLER
+    RequestExecutionLevel admin
+  !endif
   !ifndef BUILD_UNINSTALLER
     RequestExecutionLevel admin
     SilentInstall silent
@@ -14,6 +60,8 @@
   Var AnubisConsole
   Var AnubisConsoleMode
   Var AnubisMessage
+  Var AnubisAllowedUserSids
+  Var AnubisMigratePerUser
 
   Function AnubisPrint
     DetailPrint "$AnubisMessage"
@@ -37,64 +85,9 @@
   Function AnubisFail
     Call AnubisPrint
     ${If} $AnubisConsoleMode == 0
-      MessageBox MB_OK|MB_ICONSTOP "$AnubisMessage"
+      MessageBox MB_OK|MB_ICONSTOP "$AnubisMessage" /SD IDOK
     ${EndIf}
     Quit
-  FunctionEnd
-
-  ; Compare the elevated token with Explorer's token. An over-the-shoulder UAC
-  ; login changes HKCU and known folders: never silently upgrade that profile.
-  Function AnubisCheckInstallIdentity
-    System::Call 'user32::GetShellWindow() p.r0'
-    ${If} $0 == 0
-      Return
-    ${EndIf}
-    System::Call 'user32::GetWindowThreadProcessId(p r0, *i .r1)'
-    System::Call 'kernel32::OpenProcess(i 0x1000, i 0, i r1) p.r2'
-    StrCpy $3 0
-    System::Call 'advapi32::OpenProcessToken(p r2, i 8, *p .r3) i.r0'
-    System::Call 'kernel32::CloseHandle(p r2)'
-    ${If} $0 == 0
-      Goto identity_unknown
-    ${EndIf}
-    System::Alloc 512
-    Pop $4
-    System::Call 'advapi32::GetTokenInformation(p r3, i 1, p r4, i 512, *i .r5) i.r0'
-    System::Call 'kernel32::CloseHandle(p r3)'
-    ${If} $0 == 0
-      System::Free $4
-      Goto identity_unknown
-    ${EndIf}
-    System::Call '*$4(p .r6)'
-    System::Call 'kernel32::GetCurrentProcess() p.r2'
-    System::Call 'advapi32::OpenProcessToken(p r2, i 8, *p .r3) i.r0'
-    ${If} $0 == 0
-      System::Free $4
-      Goto identity_unknown
-    ${EndIf}
-    System::Alloc 512
-    Pop $7
-    System::Call 'advapi32::GetTokenInformation(p r3, i 1, p r7, i 512, *i .r5) i.r0'
-    System::Call 'kernel32::CloseHandle(p r3)'
-    ${If} $0 == 0
-      System::Free $4
-      System::Free $7
-      Goto identity_unknown
-    ${EndIf}
-    System::Call '*$7(p .r8)'
-    System::Call 'advapi32::EqualSid(p r6, p r8) i.r0'
-    System::Free $4
-    System::Free $7
-    ${If} $0 == 0
-      SetErrorLevel 1307
-      StrCpy $AnubisMessage "Installation refused: UAC used another account. Run setup as the signed-in installation owner; no profile or install-scope migration was performed. Exit code: 1307."
-      Call AnubisFail
-    ${EndIf}
-    Return
-    identity_unknown:
-      SetErrorLevel 5
-      StrCpy $AnubisMessage "Cannot verify the installation owner's Windows token. Installation stopped without changing the existing installation. Exit code: 5."
-      Call AnubisFail
   FunctionEnd
 
   !macro preInit
@@ -121,20 +114,58 @@
     ${EndIf}
     StrCpy $AnubisMessage "Anubis ${VERSION}: installer started with administrator approval."
     Call AnubisPrint
-    Call AnubisCheckInstallIdentity
   !macroend
 
   !macro customInit
-    ; initMultiUser selected the previous scope/path. The upstream silent
-    ; section otherwise switches to HKLM merely because *any* HKLM install exists.
-    ${If} $installMode == "CurrentUser"
-      StrCpy $hasPerMachineInstallation "0"
-    ${EndIf}
     ${If} ${isDeleteAppData}
       SetErrorLevel 87
       StrCpy $AnubisMessage "The installer does not accept --delete-app-data. User data must be preserved. Exit code: 87."
       Call AnubisFail
     ${EndIf}
+    ${GetParameters} $R0
+    StrCpy $AnubisAllowedUserSids ""
+    ${GetOptions} $R0 "/ALLOWUSERSIDS=" $AnubisAllowedUserSids
+    StrCpy $AnubisMigratePerUser "0"
+    ClearErrors
+    ${GetOptions} $R0 "/MIGRATEPERUSER" $R1
+    ${IfNot} ${Errors}
+      ${If} $R1 != ""
+        SetErrorLevel 87
+        StrCpy $AnubisMessage "Use the exact /MIGRATEPERUSER switch without a value. Exit code: 87."
+        Call AnubisFail
+      ${EndIf}
+      StrCpy $AnubisMigratePerUser "1"
+    ${EndIf}
+    ClearErrors
+    ${GetOptions} $R0 "/currentuser" $R1
+    ${IfNot} ${Errors}
+      SetErrorLevel 87
+      StrCpy $AnubisMessage "This installer is machine-only. Per-user migration is not supported. Exit code: 87."
+      Call AnubisFail
+    ${EndIf}
+    ReadRegStr $0 HKCU "${INSTALL_REGISTRY_KEY}" InstallLocation
+    ${If} $0 != ""
+    ${AndIf} $AnubisMigratePerUser != "1"
+      SetErrorLevel 87
+      StrCpy $AnubisMessage "A per-user installation exists. Use explicit /MIGRATEPERUSER as its owning interactive account, or remove that application separately while retaining its data. Exit code: 87."
+      Call AnubisFail
+    ${EndIf}
+    ReadRegStr $0 HKLM "${INSTALL_REGISTRY_KEY}" InstallLocation
+    ${If} $0 != ""
+    ${AndIf} $0 != "$PROGRAMFILES64\${ANUBIS_MACHINE_LEAF}"
+      SetErrorLevel 87
+      StrCpy $AnubisMessage "Existing installation is not the canonical machine package. Automatic migration is refused. Exit code: 87."
+      Call AnubisFail
+    ${EndIf}
+    !insertmacro GetDParameter $R0
+    ${If} $R0 != ""
+    ${AndIf} $R0 != "$PROGRAMFILES64\${ANUBIS_MACHINE_LEAF}"
+      SetErrorLevel 87
+      StrCpy $AnubisMessage "Custom installation paths are not supported by the protected machine host. Exit code: 87."
+      Call AnubisFail
+    ${EndIf}
+    StrCpy $INSTDIR "$PROGRAMFILES64\${ANUBIS_MACHINE_LEAF}"
+    !insertmacro AnubisMachineAction Prepare
     StrCpy $AnubisMessage "Selected scope: $installMode. Destination: $INSTDIR"
     Call AnubisPrint
   !macroend
@@ -173,6 +204,7 @@
     ; reporting success after a failed copy or a locked previous executable.
     !insertmacro AnubisVerifyCopiedFile "${APP_EXECUTABLE_FILENAME}"
     !insertmacro AnubisVerifyCopiedFile "resources\app.asar"
+    !insertmacro AnubisVerifyCopiedFile "anubis-host.exe"
     StrCpy $AnubisMessage "Application files verified; registering shortcuts and uninstall information."
     Call AnubisPrint
   !macroend
@@ -206,6 +238,9 @@
   !macroend
 
   !macro customInstall
+    !ifndef ANUBIS_MACHINE_UNINSTALL_GUARDED
+      !error "Machine setup must bypass user-writable legacy uninstallers before old-version removal."
+    !endif
     ${IfNot} ${FileExists} "$INSTDIR\${UNINSTALL_FILENAME}"
       SetErrorLevel 5
       StrCpy $AnubisMessage "The installed uninstaller is missing. Installation is incomplete. Exit code: 5."
@@ -219,7 +254,8 @@
       StrCpy $AnubisMessage "Installation registration failed. Exit code: 5."
       Call AnubisFail
     ${EndIf}
-    StrCpy $AnubisMessage "Installation configuration complete. User settings and credentials were preserved."
+    !insertmacro AnubisMachineAction Finish
+    StrCpy $AnubisMessage "SYSTEM machine engine is ready. User settings and credentials were preserved."
     Call AnubisPrint
   !macroend
 
@@ -236,21 +272,70 @@
   FunctionEnd
 !endif
 
+!ifdef BUILD_UNINSTALLER
+  !macro customUnInit
+    ${GetParameters} $R0
+    ClearErrors
+    ${GetOptions} $R0 "--delete-app-data" $R1
+    ${IfNot} ${Errors}
+      SetErrorLevel 87
+      MessageBox MB_OK|MB_ICONSTOP "Data deletion is not supported. Uninstall stopped; profiles and host data were retained." /SD IDOK
+      Quit
+    ${EndIf}
+  !macroend
+  !macro customUnInstall
+    ${IfNot} ${isUpdated}
+      !insertmacro AnubisMachineAction Remove
+    ${EndIf}
+  !macroend
+  !macro customRemoveFiles
+    ${If} ${isUpdated}
+      ; Keep the protected root/ACL while upstream atomically moves old files.
+      CreateDirectory "$PLUGINSDIR\old-install"
+      Push ""
+      Call un.atomicRMDir
+      Pop $R0
+      ${If} $R0 != 0
+        Push ""
+        Call un.restoreFiles
+        Pop $R0
+        SetErrorLevel 5
+        Abort "Could not remove the old protected package; update stopped."
+      ${EndIf}
+    ${Else}
+      SetOutPath $TEMP
+      RMDir /r "$INSTDIR"
+      ${If} ${FileExists} "$INSTDIR\*.*"
+        SetErrorLevel 5
+        Abort "Could not remove the protected package. Host data was retained."
+      ${EndIf}
+    ${EndIf}
+  !macroend
+!endif
+
 ; Never use upstream's force-close behavior (including during old-version
 ; removal). A same-name process in another session may conservatively block us,
 ; but is never terminated. The updater receives time to close normally.
 !macro customCheckAppRunning
+  !ifndef BUILD_UNINSTALLER
+    !ifmacrodef uninstallOldVersion
+      !include "${ANUBIS_MACHINE_SUPPORT}\windows-machine-uninstall-guard.nsh"
+    !endif
+  !endif
+  ; Stop only the native helper's verified service/jobs before checking for GUI
+  ; processes. Otherwise its headless anubis.exe would block every update.
+  !insertmacro AnubisMachineAction Stop
   !ifdef BUILD_UNINSTALLER
     nsProcess::_FindProcess "${APP_EXECUTABLE_FILENAME}"
     Pop $R0
     ${If} $R0 == 0
       SetErrorLevel 1618
-      MessageBox MB_OK|MB_ICONSTOP "Anubis is running. Close it normally before uninstalling. Exit code: 1618."
+      MessageBox MB_OK|MB_ICONSTOP "Anubis is running. Close it normally before uninstalling. Exit code: 1618." /SD IDOK
       Quit
     ${EndIf}
     ${If} $R0 != 603
       SetErrorLevel 5
-      MessageBox MB_OK|MB_ICONSTOP "Cannot inspect running application processes. Uninstallation stopped. Exit code: 5."
+      MessageBox MB_OK|MB_ICONSTOP "Cannot inspect running application processes. Uninstallation stopped. Exit code: 5." /SD IDOK
       Quit
     ${EndIf}
   !else

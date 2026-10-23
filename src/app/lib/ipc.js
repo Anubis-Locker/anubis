@@ -146,6 +146,7 @@ async function initAppServer () {
   const {
     config
   } = await getConfig(globalState.get('serverInited'))
+  if (globalState.get('headlessRuntime')) config.host = '127.0.0.1'
   // must happen before the server child is forked: it opens its own log level
   // from the inherited ELECTERM_DEBUG (see ../server/child-process.js)
   log.setDebugMode(!!config.debug)
@@ -200,6 +201,7 @@ async function initAppServer () {
 }
 
 function initIpc () {
+  const headless = !!globalState.get('headlessRuntime')
   powerMonitor.on('resume', () => {
     globalState.get('win').webContents.send('power-resume', null)
   })
@@ -221,8 +223,8 @@ function initIpc () {
       // straight off disk (see widgets/instance-log.js)
       widgetLogPath: widgetLog.getLogDir()
     }
-    initApp(langMap, config)
-    initShortCut(globalShortcut, globalState.get('win'), config)
+    initApp(langMap, config, { headless })
+    if (!headless) initShortCut(globalShortcut, globalState.get('win'), config)
     return globs
   }
 
@@ -337,7 +339,7 @@ function initIpc () {
         win.setTitleBarOverlay(opts)
       }
     },
-    changeHotkey: changeHotkeyReg(globalShortcut, globalState.get('win')),
+    changeHotkey: headless ? () => false : changeHotkeyReg(globalShortcut, globalState.get('win')),
     initCommandLine,
     // No renderer-supplied options: the main process owns platform/execPath.
     // `packaged` is the guard against a dev run, where execPath is Electron.
@@ -374,6 +376,16 @@ function initIpc () {
     functions: asyncGlobals,
     getConfig: () => globalState.get('config'),
     getPassword: require('./get-config').getDbConfig,
+    onAuthorizedLogin: globalState.get('headlessRuntime')
+      ? async password => {
+        if (!await checkPassword(password)) throw new Error('Headless workspace authentication changed')
+        const win = globalState.get('win')
+        if (!win || win.isDestroyed()) throw new Error('Headless workspace is unavailable')
+        globalState.set('headlessAuthorizedLogin', true)
+        win.webContents.send('headless-authorized-login')
+        await require('./machine-host-entry').waitForWorkspace(win, false, Date.now() + 10000)
+      }
+      : undefined,
     constants: () => {
       const props = ipcSyncFuncs.getConstants()
       return {

@@ -233,6 +233,22 @@ The published stable desktop release is
 All eight exact accepted CI binaries and their SHA256 manifest are mirrored to
 our download host; both stable update feeds advertise the same release.
 
+**Windows lifecycle limitation in 5.6.12:** the backend and managed agent belong
+to the desktop process. Closing the application stops them and takes the device
+offline. This release does not install a Windows service or provide SYSTEM/user
+execution-context switching. Installer elevation does not change the account
+running the application or its terminals. The acceptance results below do not
+establish unattended, GUI-independent operation; the machine-host replacement
+is not yet released.
+
+The experimental replacement has passed isolated real SCM/SYSTEM terminal and
+GUI acceptance, same-window reconnection after a service restart, and an actual
+logged-on Root WTS context with a separate password-protected QA profile.
+Encrypted bookmarks survive a service restart without changing the working user
+profile. This does not establish pre-logon/reboot behavior, another Windows
+account, or acceptance of the production installer and device-identity migration.
+See `docs/ADMIN-VS-USER.md` and `docs/WINDOWS-INSTALLER.md` for the current boundaries.
+
 | Platform | Status |
 |---|---|
 | Linux (deb/AppImage/tar.gz) | 5.6.12 published. Exact CI tar.gz passed terminal execution, settings, native serial PTY input/output, bookmark persistence and OS-keyring encryption in an isolated Ubuntu desktop session; deb/AppImage installation was not exercised |

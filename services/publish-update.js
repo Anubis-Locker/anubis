@@ -21,6 +21,11 @@ function publishUpdate (inputFile, outDir) {
         new URL(asset.browser_download_url).protocol !== 'https:') {
       throw new Error('Invalid release asset')
     }
+    if (asset.windows_machine_host !== undefined &&
+        (asset.windows_machine_host !== 1 || !asset.name.endsWith('-win-x64-installer.exe') ||
+        !/^sha256:[a-f0-9]{64}$/i.test(asset.digest))) {
+      throw new Error('Invalid Windows machine-host update declaration')
+    }
   }
   const dataDir = path.join(outDir, 'data')
   fs.mkdirSync(dataDir, { recursive: true })

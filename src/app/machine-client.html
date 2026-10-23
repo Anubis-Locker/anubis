@@ -1,0 +1,38 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; object-src 'none'; frame-src 'none'">
+  <title>Anubis-Security-Tool</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; color: #e3e7ec; background: #17191d; font: 13px system-ui, sans-serif; }
+    header { height: 52px; display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-bottom: 1px solid #363b43; overflow-x: auto; }
+    strong { white-space: nowrap; }
+    button, select { color: inherit; background: #252932; border: 1px solid #4b5563; border-radius: 5px; padding: 6px 10px; }
+    select { min-width: 240px; max-width: 420px; }
+    button { cursor: pointer; }
+    button:disabled, select:disabled { opacity: .55; cursor: default; }
+    #status { margin-left: auto; color: #b2bdcb; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #intent-status { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #error { margin: 70px auto; padding: 24px; max-width: 760px; line-height: 1.7; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <header>
+    <strong>Anubis-Security-Tool</strong>
+    <select id="context" aria-label="Windows execution context" disabled></select>
+    <button id="refresh">Refresh</button>
+    <button id="elevate" hidden>Request administrator access</button>
+    <button id="intent" hidden>Open requested connection</button>
+    <button id="intent-clear" hidden>Clear requests</button>
+    <span id="intent-status" role="status"></span>
+    <button id="update">Check updates</button>
+    <span id="update-status" role="status"></span>
+    <span id="status" role="status">Connecting to Windows service...</span>
+  </header>
+  <main id="error" role="alert" hidden></main>
+  <script src="./machine-client-ui.js"></script>
+</body>
+</html>

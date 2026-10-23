@@ -4,7 +4,7 @@
  */
 
 import uid from '../common/uid'
-import { settingMap } from '../common/constants'
+import { settingMap, isWin } from '../common/constants'
 import { refs, refsTabs } from '../components/common/ref'
 import { runCmd, execCmd } from '../components/terminal/terminal-apis'
 import deepCopy from 'json-deep-copy'
@@ -18,6 +18,7 @@ import {
 } from '../components/bookmark-form/fix-bookmark-default'
 import newTerm from '../common/new-terminal'
 import dangerousSessionFields from '../common/dangerous-session-fields'
+import { createPtyCommand, waitForPtyReady } from '../components/terminal/mcp-pty-command.js'
 
 // Dangerous props that must not be accepted from MCP/AI tool calls.
 // Shared with src/client/store/tab.js and the quick connect parser so the
@@ -969,15 +970,19 @@ export default Store => {
     const { command, tabId, timeoutMs } = args
     const marker = `__ET_EXEC_${uid()}__`
     const startLine = `${marker}S`
-    // Run in a subshell so commands like `exit`/`exec` cannot kill the outer
-    // shell before the end sentinel is emitted; $? holds the subshell's code.
-    const wrapped = `echo "${startLine}"; ( ${command} ); echo "${marker}E$?"`
+    const start = Date.now()
+    const terminal = await waitForPtyReady(() => refs.get('term-' + tabId), timeoutMs)
+    const tab = store.tabs.find(item => item.id === tabId)
+    const local = tab && (tab.type === 'local' || (!tab.type && !tab.host))
+    const shell = local && isWin
+      ? terminal.localShell || tab.execWindows || store.config.execWindows
+      : ''
+    const wrapped = createPtyCommand(command, marker, shell)
 
     store.runQuickCommand(wrapped, false, tabId)
 
-    const start = Date.now()
     const pollInterval = 300
-    const endRe = new RegExp(`^${marker}E(\\d+)$`)
+    const endRe = new RegExp(`^${marker}E(-?\\d+)$`)
 
     while (Date.now() - start < timeoutMs) {
       const lines = collectBufferLines(tabId)

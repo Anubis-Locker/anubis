@@ -62,3 +62,27 @@ test('does not overwrite malformed existing metadata or a concurrently locked fe
   assert.throws(() => publishUpdate(f.input, f.output))
   assert.equal(fs.readFileSync(primary, 'utf8'), '{}')
 })
+
+test('machine-host promotion requires an installer and its verified SHA256 declaration', t => {
+  const f = fixture(t)
+  const asset = {
+    ...f.release.assets[0],
+    name: 'anubis-5.6.11-win-x64-installer.exe',
+    windows_machine_host: 1,
+    digest: 'sha256:' + 'a'.repeat(64)
+  }
+  for (const invalid of [
+    { ...asset, digest: null },
+    { ...asset, windows_machine_host: true },
+    { ...asset, name: 'anubis-5.6.11-win-x64.tar.gz' }
+  ]) {
+    f.save({ ...f.release, assets: [invalid] })
+    assert.throws(() => publishUpdate(f.input, f.output), /machine-host/)
+    assert.equal(fs.existsSync(path.join(f.output, 'version.html')), false)
+  }
+  f.save({ ...f.release, assets: [asset] })
+  publishUpdate(f.input, f.output)
+  const published = JSON.parse(fs.readFileSync(path.join(f.output, 'data', 'anubis-release.json'), 'utf8'))
+  assert.equal(published.release.assets[0].windows_machine_host, 1)
+  assert.equal(published.release.assets[0].digest, asset.digest)
+})

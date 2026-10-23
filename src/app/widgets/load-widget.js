@@ -78,13 +78,13 @@ function listWidgets () {
   // ]
 }
 
-function hasRunningInstance (widgetId) {
+function getRunningInstance (widgetId) {
   for (const [, instance] of runningInstances) {
     if (instance.widgetId === widgetId) {
-      return true
+      return instance
     }
   }
-  return false
+  return null
 }
 
 function runWidget (widgetId, config) {
@@ -96,7 +96,10 @@ function runWidget (widgetId, config) {
   }
 
   // Check if singleInstance widget already has a running instance
-  if (singleInstance && hasRunningInstance(widgetId)) {
+  const existing = singleInstance && getRunningInstance(widgetId)
+  if (existing) {
+    if (widgetId === 'mcp-server' && config?.autoRun === true &&
+        require('../lib/glob-state').get('headlessRuntime')) return existing.startPromise
     return Promise.reject(new Error(`Widget ${widgetId} already has a running instance. Only one instance is allowed.`))
   }
 
@@ -111,7 +114,7 @@ function runWidget (widgetId, config) {
   const logger = widgetLog.loggerFor(instance.instanceId)
   logger.log('info', `Starting ${widget.widgetInfo.name} (${widgetId})`)
 
-  return instance.start()
+  instance.startPromise = instance.start()
     .then((result) => {
       logger.log('info', result && result.msg ? result.msg : 'Started')
       return {
@@ -128,6 +131,7 @@ function runWidget (widgetId, config) {
       runningInstances.delete(instance.instanceId)
       return instance.stop().catch(() => {}).then(() => { throw err })
     })
+  return instance.startPromise
 }
 
 function stopWidget (instanceId) {

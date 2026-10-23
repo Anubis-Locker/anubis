@@ -1,5 +1,6 @@
 const { join } = require('path')
 const { copyWindowsTerminalRuntime } = require('./windows-terminal-runtime')
+const { copyWindowsMachineHost } = require('./windows-machine-host')
 
 module.exports = async function afterPack (context) {
   if (context.electronPlatformName !== 'win32') {
@@ -13,4 +14,5 @@ module.exports = async function afterPack (context) {
     'node_modules', 'node-pty', 'build', 'Release'
   )
   copyWindowsTerminalRuntime(ptyDir, releaseDir, arch)
+  copyWindowsMachineHost(context, arch)
 }

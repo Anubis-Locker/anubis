@@ -6,12 +6,22 @@ on:
       tag:
         required: true
         type: string
+      windows_machine_host:
+        description: 'Promote the QA-accepted per-machine Windows installer'
+        required: false
+        default: false
+        type: boolean
   workflow_dispatch:
     inputs:
       tag:
         description: 'Existing stable release, for example v5.6.11'
         required: true
         type: string
+      windows_machine_host:
+        description: 'Declare the Windows installer QA-accepted for the machine service (not legacy desktop)'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -25,6 +35,7 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       TAG: ${{ inputs.tag }}
+      WINDOWS_MACHINE_HOST: ${{ inputs.windows_machine_host }}
       DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
       DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
       DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
@@ -72,6 +83,7 @@ jobs:
         node - <<'NODE'
         const fs = require('node:fs')
         const assert = require('node:assert/strict')
+        const crypto = require('node:crypto')
         const brand = require('./src/common/brand.config')
         const release = JSON.parse(fs.readFileSync('release.json', 'utf8'))
         assert.equal(release.tag_name, process.env.TAG)
@@ -79,11 +91,19 @@ jobs:
         assert.equal(release.prerelease, false)
         const files = fs.readdirSync('validated')
         assert.equal(release.assets.length, files.length)
+        let machineInstallers = 0
         for (const asset of release.assets) {
           assert.ok(files.includes(asset.name))
           assert.equal(asset.size, fs.statSync('validated/' + asset.name).size)
+          asset.digest = 'sha256:' + crypto.createHash('sha256').update(fs.readFileSync('validated/' + asset.name)).digest('hex')
+          if (process.env.WINDOWS_MACHINE_HOST === 'true' &&
+              asset.name === `${brand.id}-${process.env.TAG.slice(1)}-win-x64-installer.exe`) {
+            asset.windows_machine_host = 1
+            machineInstallers++
+          }
           asset.browser_download_url = `${brand.domains.download}/releases/${release.tag_name}/${encodeURIComponent(asset.name)}`
         }
+        if (process.env.WINDOWS_MACHINE_HOST === 'true') assert.equal(machineInstallers, 1)
         fs.writeFileSync('mirrored-release.json', JSON.stringify(release))
         NODE
 

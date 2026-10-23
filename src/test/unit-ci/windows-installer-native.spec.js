@@ -31,6 +31,9 @@ OutFile "${exe}"
 !define VERSION "5.6.10"
 !define APP_EXECUTABLE_FILENAME "anubis-native-hook-fixture.exe"
 !define isDeleteAppData "0 == 1"
+; The hook harness never invokes the deployment/SCM script.
+!macro AnubisMachineAction ACTION
+!macroend
 !include "${include}"
 Var installMode
 Var hasPerMachineInstallation
@@ -51,22 +54,6 @@ Section
     SetErrors
     StrCpy $R0 0
     !insertmacro AnubisCheckUninstallResult
-  \${ElseIf} $R9 == "scope-current"
-    StrCpy $installMode "CurrentUser"
-    StrCpy $hasPerMachineInstallation "1"
-    !insertmacro customInit
-    \${If} $hasPerMachineInstallation != "0"
-      SetErrorLevel 99
-      Quit
-    \${EndIf}
-  \${ElseIf} $R9 == "scope-machine"
-    StrCpy $installMode "all"
-    StrCpy $hasPerMachineInstallation "1"
-    !insertmacro customInit
-    \${If} $hasPerMachineInstallation != "1"
-      SetErrorLevel 99
-      Quit
-    \${EndIf}
   \${ElseIf} $R9 == "app-idle"
     !insertmacro customCheckAppRunning
   \${Else}
@@ -75,8 +62,10 @@ Section
     CreateDirectory "$INSTDIR\\resources"
     File /oname=$PLUGINSDIR\\7z-out\\anubis-native-hook-fixture.exe "${fixture}"
     File /oname=$PLUGINSDIR\\7z-out\\resources\\app.asar "${fixture}"
+    File /oname=$PLUGINSDIR\\7z-out\\anubis-host.exe "${fixture}"
     CopyFiles /SILENT "$PLUGINSDIR\\7z-out\\anubis-native-hook-fixture.exe" "$INSTDIR"
     CopyFiles /SILENT "$PLUGINSDIR\\7z-out\\resources\\app.asar" "$INSTDIR\\resources"
+    CopyFiles /SILENT "$PLUGINSDIR\\7z-out\\anubis-host.exe" "$INSTDIR"
     \${If} $R9 == "copy-corrupt"
       FileOpen $0 "$INSTDIR\\resources\\app.asar" w
       FileWrite $0 "corrupted"
@@ -102,8 +91,6 @@ SectionEnd
       ['copy-error', 5, /extraction\/copy failed/],
       ['uninstall-failed', 740, /Exit code: 740/],
       ['uninstall-launch-failed', 2, /Exit code: 2/],
-      ['scope-current', 0, /Selected scope: CurrentUser/],
-      ['scope-machine', 0, /Selected scope: all/],
       ['app-idle', 0, /no sessions will be terminated/]
     ]) {
       const result = spawnSync(exe, [`--scenario=${scenario}`], { env, encoding: 'utf8', timeout: 15000 })

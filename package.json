@@ -1,6 +1,6 @@
 {
   "name": "anubis",
-  "version": "5.6.12",
+  "version": "5.7.0",
   "description": "Anubis-Security-Tool: terminal/ssh/sftp/telnet/serialport/RDP/VNC/Spice/ftp client (Linux, macOS, Windows).",
   "main": "app.js",
   "scripts": {
@@ -101,7 +101,7 @@
     "vite": "8.1.0"
   },
   "dependencies": {
-    "@ai-security-tool/managed-access": "1.0.1",
+    "@ai-security-tool/managed-access": "1.0.2",
     "@ai-security-tool/anubis-browser-assets": "5.6.11",
     "@ai-security-tool/ftp-srv": "^1.0.6",
     "@ai-security-tool/locales": "2.3.34",
@@ -163,7 +163,8 @@
     "ignore": [
       "work",
       "temp",
-      "dist"
+      "dist",
+      "native/windows-host/out"
     ],
     "globals": [
       "log",

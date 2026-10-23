@@ -627,6 +627,7 @@ class ElectermMCPServer {
         description: 'Execute a non-interactive shell command and return a structured result: { stdout, stderr, exitCode, durationMs, timedOut, truncated, mode, tabId }. ' +
           'On SSH tabs this uses a dedicated exec channel (mode="exec") with real stdout/stderr/exit code capture — no terminal buffer parsing needed. ' +
           'On other tabs it falls back to sentinel-based PTY capture (mode="pty", stderr merged into stdout). ' +
+          'Local PowerShell PTY commands run in a child PowerShell without profiles: numeric exit codes are captured, exit cannot close the terminal, and session-only variables/functions are not inherited. ' +
           'Prefer this over send_electerm_terminal_command + wait_for_electerm_terminal_idle for regular commands like git status, docker ps, npm test. ' +
           'For interactive programs (vim, top, ssh) use the terminal send/read tools instead. ' +
           'For long-running commands pass wait=false: runs in the background and returns an MCP task handle (poll with tasks/get, stop with tasks/cancel). Requires the MCP Tasks extension.',
@@ -1300,7 +1301,7 @@ class ElectermMCPServer {
         }
 
         const serverInfo = {
-          url: `http://${host}:${port}/mcp`,
+          url: `http://${host}:${this.httpServer.address().port}/mcp`,
           protocol: 'mcp',
           version: self.mcpServer.supportedProtocolVersions[0],
           apiKey: self.config.apiKey
@@ -1386,6 +1387,10 @@ function applyAdminMcp (config) {
     throw new Error('MCP server is disabled by the administrator')
   }
   config.apiKey = getMcpToken()
+  if (globalState.get('headlessRuntime')) {
+    config.host = '127.0.0.1'
+    config.port = 0
+  }
   return true
 }
 

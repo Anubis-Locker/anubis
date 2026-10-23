@@ -3,7 +3,7 @@ const assert = require('node:assert/strict')
 const crypto = require('node:crypto')
 const { createBrowserRpc } = require('../../app/lib/managed-browser-rpc')
 
-function fixture () {
+function fixture (options = {}) {
   const salt = 'isolated-fixture-salt'
   const password = {
     salt,
@@ -17,6 +17,7 @@ function fixture () {
   }
   const rpc = createBrowserRpc({
     functions,
+    ...options,
     getConfig: () => config,
     getPassword: async () => password,
     constants: () => ({ packInfo: { version: '5.6.11' } }),
@@ -43,7 +44,7 @@ test('browser authentication verifies the existing desktop password independentl
 
 test('browser RPC denies native process controls, prototype pivots and authentication records', async () => {
   const { rpc, db } = fixture()
-  for (const func of ['constructor', '__proto__', 'toString', 'closeApp', 'restart', 'safeDecrypt', 'setPassword']) {
+  for (const func of ['constructor', '__proto__', 'toString', 'closeApp', 'restart', 'safeDecrypt', 'setPassword', 'onAuthorizedLogin', 'isHeadlessAuthorized']) {
     await assert.rejects(rpc(func), /Unsupported/)
   }
   for (const args of [
@@ -58,6 +59,36 @@ test('browser RPC denies native process controls, prototype pivots and authentic
   for (const key of ['hashedPassword', 'salt', 'requireAuth', 'mcpServerToken']) {
     await assert.rejects(rpc('saveUserConfig', [{ [key]: 'evil' }]), /cannot be changed remotely/)
   }
+})
+
+test('only verified profile passwords invoke and await an explicitly enabled headless unlock', async () => {
+  let calls = 0
+  let release
+  const pending = new Promise(resolve => { release = resolve })
+  const { rpc } = fixture({
+    async onAuthorizedLogin (password) {
+      assert.equal(password, 'desktop-password')
+      calls++
+      await pending
+    }
+  })
+  assert.equal(await rpc('browserLogin', ['wrong-password']), false)
+  assert.equal(await rpc('browserLogin', [null]), false)
+  assert.equal(calls, 0)
+  let finished = false
+  const login = rpc('browserLogin', ['desktop-password']).then(value => { finished = true; return value })
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(calls, 1)
+  assert.equal(finished, false)
+  release()
+  assert.equal(await login, true)
+})
+
+test('failed native unlock remains an explicit failure instead of a successful browser login', async () => {
+  const { rpc } = fixture({
+    async onAuthorizedLogin () { throw new Error('native workspace unavailable') }
+  })
+  await assert.rejects(rpc('browserLogin', ['desktop-password']), /native workspace unavailable/)
 })
 
 test('browser RPC reuses the existing DB/config functions and preserves ordering data', async () => {

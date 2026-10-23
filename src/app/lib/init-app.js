@@ -16,7 +16,7 @@ function capitalizeFirstLetter (string) {
   return string.charAt(0).toUpperCase() + string.slice(1)
 }
 
-function initApp (langMap, config) {
+function initApp (langMap, config, { headless = false } = {}) {
   globalState.set('langMap', langMap)
   globalState.set('getLang', (lang = config.language || 'en_us') => {
     return langMap[lang].lang
@@ -30,6 +30,7 @@ function initApp (langMap, config) {
     }
     return globalState.get('getLang')()[txt] || txt
   })
+  if (headless) return
   const menu = buildMenu()
   Menu.setApplicationMenu(menu)
   const e = globalState.get('translate')

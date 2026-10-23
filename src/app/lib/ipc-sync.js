@@ -66,6 +66,8 @@ module.exports = {
     return globalState.get('rawArgs')
   },
   shouldAuth: () => globalState.get('requireAuth'),
+  isHeadlessRuntime: () => !!globalState.get('headlessRuntime'),
+  isHeadlessAuthorized: () => !!globalState.get('headlessRuntime') && !!globalState.get('headlessAuthorizedLogin'),
   getLoadTime: () => {
     return globalState.get('loadTime')
       ? { loadTime: globalState.get('loadTime') }

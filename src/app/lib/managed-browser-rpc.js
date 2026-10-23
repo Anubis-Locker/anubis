@@ -25,7 +25,7 @@ function sanitizeConfig (config) {
   return result
 }
 
-function createBrowserRpc ({ functions, getConfig, getPassword, constants, init }) {
+function createBrowserRpc ({ functions, getConfig, getPassword, constants, init, onAuthorizedLogin }) {
   return async (func, args = []) => {
     if (!Array.isArray(args)) throw new Error('Invalid browser RPC arguments')
     if (func === 'browserInfo') {
@@ -41,7 +41,9 @@ function createBrowserRpc ({ functions, getConfig, getPassword, constants, init 
       if (typeof args[0] !== 'string' || args[0].length > 4096 || !salt) return false
       const actual = crypto.pbkdf2Sync(args[0], salt, 1000, 64, 'sha512')
       const expected = Buffer.from(hashedPassword, 'hex')
-      return actual.length === expected.length && crypto.timingSafeEqual(actual, expected)
+      const valid = actual.length === expected.length && crypto.timingSafeEqual(actual, expected)
+      if (valid && onAuthorizedLogin) await onAuthorizedLogin(args[0])
+      return valid
     }
     if (func === 'init') {
       const result = await init()

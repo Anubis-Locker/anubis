@@ -1,9 +1,12 @@
-const { test } = require('node:test')
+const { test, mock } = require('node:test')
 const assert = require('node:assert/strict')
 const { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } = require('fs')
 const { tmpdir } = require('os')
 const { join } = require('path')
 const { Arch } = require('builder-util')
+const machineHost = require('../../build/bin/windows-machine-host')
+// Native compilation has its own contract tests; ConPTY fixtures are not Go builds.
+const hostBuild = mock.method(machineHost, 'copyWindowsMachineHost', () => {})
 const afterPack = require('../../build/bin/after-pack')
 
 function fixture (t, arch = 'x64') {
@@ -32,6 +35,7 @@ for (const arch of ['x64', 'arm64']) {
       writeFileSync(join(source, file), `${arch}:${file}`)
     }
     await afterPack(context)
+    assert.ok(hostBuild.mock.calls.some(call => call.arguments[0] === context && call.arguments[1] === arch))
     for (const file of ['conpty.dll', 'OpenConsole.exe']) {
       assert.equal(readFileSync(join(release, 'conpty', file), 'utf8'), `${arch}:${file}`)
     }

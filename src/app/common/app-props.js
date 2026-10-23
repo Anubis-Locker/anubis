@@ -11,6 +11,12 @@ function getDataPath () {
     appPath: app.getPath('appData'),
     isPortable: false
   }
+  if (require('../lib/glob-state').get('machineRuntimeRole')) {
+    return {
+      ...defaultValue,
+      ...(constants.isWin ? { exePath: require('path').dirname(app.getPath('exe')) } : {})
+    }
+  }
   if (!constants.isWin) {
     return defaultValue
   }

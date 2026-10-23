@@ -19,6 +19,10 @@ jobs:
     - uses: actions/setup-node@v4
       with:
         node-version: 24.x
+    - uses: actions/setup-go@v6
+      with:
+        go-version-file: native/windows-host/go.mod
+        cache-dependency-path: native/windows-host/go.sum
     - uses: actions/setup-python@v5
       with:
         python-version: '3.11'
@@ -29,6 +33,8 @@ jobs:
     - run: npm ci --legacy-peer-deps
     - run: npm run b
     - run: npm run pb
+    - name: Verify machine installer contracts (no installation)
+      run: node --test src/test/unit-ci/windows-machine-packaging.spec.js src/test/unit-ci/windows-machine-edition.spec.js src/test/unit-ci/windows-installer.spec.js
 
     - name: Build NSIS installer (signed only when CSC_LINK is set)
       shell: bash

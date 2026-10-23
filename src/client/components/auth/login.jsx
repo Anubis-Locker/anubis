@@ -28,6 +28,17 @@ export default function Login () {
     init()
   }, [])
 
+  useEffect(() => {
+    if (window.et.isWebApp || !window.pre.runSync('isHeadlessRuntime')) return
+    const unlock = () => {
+      setLogined(true)
+      setLoading(false)
+    }
+    window.pre.ipcOnEvent('headless-authorized-login', unlock)
+    if (window.pre.runSync('isHeadlessAuthorized')) unlock()
+    return () => window.pre.ipcOffEvent('headless-authorized-login', unlock)
+  }, [])
+
   const init = async () => {
     if (!window.pre.requireAuth) {
       return

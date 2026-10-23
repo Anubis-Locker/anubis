@@ -12,6 +12,14 @@ const globalState = require('./glob-state')
 const { restoreWindowBounds } = require('./window-restore')
 
 exports.getScreenCurrent = () => {
+  if (globalState.get('headlessRuntime')) {
+    return {
+      workAreaSize: { width: 1920, height: 1080 },
+      workArea: { x: 0, y: 0 },
+      bounds: { x: 0, y: 0, width: 1920, height: 1080 },
+      scaleFactor: 1
+    }
+  }
   const rect = globalState.get('win')
     ? globalState.get('win').getBounds()
     : {
@@ -34,12 +42,14 @@ exports.getScreenSize = () => {
 }
 
 exports.maximize = () => {
+  if (globalState.get('headlessRuntime')) return false
   const win = globalState.get('win')
   globalState.set('oldRectangle', win.getBounds())
   win.maximize()
 }
 
 exports.unmaximize = () => {
+  if (globalState.get('headlessRuntime')) return false
   const oldRectangle = globalState.get('oldRectangle') || {
     width: minWindowWidth,
     height: minWindowHeight,
