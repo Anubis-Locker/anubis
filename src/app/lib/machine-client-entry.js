@@ -56,6 +56,14 @@ async function startMachineClient () {
     return receiveSecondInstance(argv, cwd)
   })
   await app.whenReady()
+  try {
+    const { readDeepLinkAutoRegister } = require('./machine-client-protocols')
+    if (readDeepLinkAutoRegister(app.getPath('appData'), brand.data.dirName, require('./safe-storage').safeDecrypt)) {
+      require('./deep-link').registerDeepLink()
+    }
+  } catch (error) {
+    require('../common/log').error('Machine client protocol registration failed', error.code || 'ERR_MACHINE_PROTOCOL_CONFIG')
+  }
   const win = new BrowserWindow({
     width: 1280,
     height: 840,

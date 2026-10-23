@@ -18,16 +18,29 @@ async function fixture (t, options = {}) {
   const dialogs = []
   const opened = []
   const elevations = []
+  const protocolCalls = []
+  const protocolErrors = []
   const calls = { checks: 0, downloads: 0, preparations: 0, launches: 0, quits: 0 }
+  let ready = false
+  if ('protocolConfig' in options || 'protocolStored' in options) {
+    const { DatabaseSync } = require('node:sqlite')
+    const dir = path.join(root, 'fixture', 'users', 'default_user')
+    fs.mkdirSync(dir, { recursive: true })
+    const db = new DatabaseSync(path.join(dir, 'electerm_data.db'))
+    db.exec('CREATE TABLE data (_id TEXT PRIMARY KEY, data TEXT)')
+    db.prepare('INSERT INTO data VALUES (?, ?)').run('userConfig',
+      options.protocolStored ?? JSON.stringify(options.protocolConfig))
+    db.close()
+  }
   let sessions = [{ id: 2, sid: 'S-1-5-21-111-222-333-1001', account: 'MACHINE\\user', state: 0 }]
   const app = Object.assign(new EventEmitter(), {
     setName () {},
     setPath () {},
     getPath: () => root,
     getVersion: () => '5.6.12',
-    requestSingleInstanceLock: () => true,
+    requestSingleInstanceLock: () => options.primary !== false,
     releaseSingleInstanceLock () {},
-    whenReady: async () => {},
+    whenReady: async () => { ready = true },
     quit () { calls.quits++ }
   })
   class Contents extends EventEmitter {
@@ -96,7 +109,8 @@ async function fixture (t, options = {}) {
               sid: 'S-1-5-21-111-222-333-1001',
               sessionId: 2,
               elevated: options.elevated !== false,
-              systemDirectory: 'C:\\Windows\\System32'
+              systemDirectory: 'C:\\Windows\\System32',
+              ...options.actor
             }
           : { valid: true })
       }
@@ -123,6 +137,17 @@ async function fixture (t, options = {}) {
     './machine-host-entry': { cleanRuntimeEnvironment () {} },
     './machine-client-intent': require('../../app/lib/machine-client-intent'),
     './embedded-website': require('../../app/lib/embedded-website'),
+    './machine-client-protocols': require('../../app/lib/machine-client-protocols'),
+    './safe-storage': { safeDecrypt: value => options.decrypt ? options.decrypt(value) : value },
+    './deep-link': {
+      registerDeepLink (...args) {
+        assert.equal(ready, true)
+        protocolCalls.push(args)
+        if (options.registrationError) throw options.registrationError
+        return { registered: true }
+      }
+    },
+    '../common/log': { error: (...args) => protocolErrors.push(args) },
     './machine-client-connection': {
       createMachineConnection: config => createMachineConnection({
         ...config,
@@ -172,12 +197,13 @@ async function fixture (t, options = {}) {
     AbortController,
     Buffer
   })(name => {
+    options.required?.push(name)
     assert.ok(Object.hasOwn(dependencies, name), 'Unexpected dependency: ' + name)
     return dependencies[name]
   }, output)
   const client = await output.exports.startMachineClient()
-  t.after(() => client.win.emit('closed'))
-  const event = { sender: client.win.webContents, senderFrame: client.win.webContents.mainFrame }
+  t.after(() => client?.win.emit('closed'))
+  const event = client && { sender: client.win.webContents, senderFrame: client.win.webContents.mainFrame }
   return {
     ...client,
     event,
@@ -189,6 +215,8 @@ async function fixture (t, options = {}) {
     opened,
     dialogs,
     elevations,
+    protocolCalls,
+    protocolErrors,
     async secondInstance (args, rawArgs) {
       const argv = [path.join(root, 'anubis.exe'), ...args]
       await app.listeners('second-instance')[0]({}, rawArgs || argv, root, { version: 1, argv, cwd: root })
@@ -197,6 +225,58 @@ async function fixture (t, options = {}) {
     invoke: (name, ...args) => handlers.get('machine-client-' + name)(event, ...args)
   }
 }
+
+test('interactive primary startup registers protocols by default after ready without forcing development registration', async t => {
+  for (const options of [{}, { protocolConfig: { deepLinkAutoRegister: true } }]) {
+    const f = await fixture(t, options)
+    assert.deepEqual(f.protocolCalls, [[]])
+    assert.deepEqual(f.protocolErrors, [])
+    assert.equal(f.requests.length, 0)
+  }
+})
+
+test('interactive caller opt-out is honored before any workspace selection, including encrypted configuration', async t => {
+  for (const options of [
+    { protocolConfig: { deepLinkAutoRegister: false } },
+    {
+      protocolStored: 'enc:fixture-encrypted',
+      decrypt: value => {
+        assert.equal(value, 'fixture-encrypted')
+        return JSON.stringify({ deepLinkAutoRegister: false })
+      }
+    }
+  ]) {
+    const f = await fixture(t, options)
+    assert.deepEqual(f.protocolCalls, [])
+    assert.deepEqual(f.protocolErrors, [])
+    assert.equal(f.requests.length, 0)
+  }
+})
+
+test('unreadable protocol preference does not re-enable registration and failures are sanitized without breaking the GUI', async t => {
+  const invalid = await fixture(t, { protocolStored: 'private-setting-not-valid-json' })
+  assert.deepEqual(invalid.protocolCalls, [])
+  assert.ok(invalid.win)
+  assert.match(invalid.protocolErrors[0][0], /protocol registration failed/)
+  assert.doesNotMatch(JSON.stringify(invalid.protocolErrors), /private-setting/)
+  const refused = await fixture(t, { registrationError: Object.assign(new Error('Private OS detail'), { code: 'ERR_REGISTRATION' }) })
+  assert.ok(refused.win)
+  assert.deepEqual(refused.protocolErrors, [['Machine client protocol registration failed', 'ERR_REGISTRATION']])
+})
+
+test('SYSTEM, session zero and secondary instances never load or register protocol handlers', async t => {
+  for (const actor of [{ sid: 'S-1-5-18' }, { sessionId: 0 }]) {
+    const required = []
+    await assert.rejects(fixture(t, { actor, required }), /interactive user session/)
+    assert.equal(required.includes('./machine-client-protocols'), false)
+    assert.equal(required.includes('./deep-link'), false)
+  }
+  const required = []
+  const secondary = await fixture(t, { primary: false, required })
+  assert.equal(secondary.calls.quits, 1)
+  assert.deepEqual(secondary.protocolCalls, [])
+  assert.equal(required.includes('./machine-client-protocols'), false)
+})
 
 test('only the trusted toolbar can check/install updates and a confirmed protected launch closes the GUI', async t => {
   const f = await fixture(t)
