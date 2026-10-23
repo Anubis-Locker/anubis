@@ -211,6 +211,32 @@ test('packaged Windows desktop functionality', { timeout: 180000 }, async t => {
     assert.deepEqual(Object.keys(registration).sort(), ['anubis', 'ssh', 'telnet', 'vnc', 'rdp', 'spice', 'serial', 'ftp'].sort())
     assert.ok(Object.values(registration).every(Boolean))
   })
+  await t.test('the Batch Operation widget connects, runs a command and transfers actual files both ways', async () => {
+    const download = join(root, 'batch-download.txt')
+    const workflow = [
+      {
+        name: 'Connect isolated SSH', action: 'connect',
+        params: { host: '127.0.0.1', port, username: TEST_USERNAME, password: TEST_PASSWORD, useSshAgent: false }
+      },
+      { name: 'Execute command', action: 'command', command: 'node -p "\'ANUBIS_\'+\'BATCH_OK\'"', afterDelay: 200 },
+      { name: 'Download fixture', action: 'sftp_download', remotePath: `/${markerFile}`, localPath: download },
+      { name: 'Upload fixture', action: 'sftp_upload', localPath: download, remotePath: '/batch-upload.txt' }
+    ]
+    await page.locator('.control-icon-wrap[title="Widgets"]').click()
+    try {
+      await page.locator('.setting-wrap .item-list-unit .list-item-title').filter({ hasText: 'Batch Operation' }).first().click()
+      await page.locator('.batch-op-editor textarea').fill(JSON.stringify(workflow))
+      await page.locator('.batch-op-editor').getByRole('button', { name: /Execute Workflow/ }).click()
+      await page.locator('.batch-op-log-entry.completed').waitFor({ timeout: 30000 })
+      assert.equal(await page.locator('.batch-op-log-entry.success').count(), workflow.length)
+      assert.equal(await page.locator('.batch-op-log-entry.error').count(), 0)
+      assert.equal(readFileSync(download, 'utf8'), 'sftp fixture')
+      assert.equal(readFileSync(join(remoteFiles, 'batch-upload.txt'), 'utf8'), 'sftp fixture')
+    } finally {
+      await page.locator('.close-setting-wrap:visible').first().click()
+    }
+    await page.waitForFunction(() => document.body.innerText.includes('ANUBIS_BATCH_OK'))
+  })
   await t.test('FTP authenticates and lists a real remote directory', async () => {
     await page.evaluate(options => window.store.addTab(options), {
       type: 'ftp',

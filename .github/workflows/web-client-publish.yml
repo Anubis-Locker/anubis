@@ -33,7 +33,7 @@ jobs:
       env:
         NPM_REGISTRY_URL: ${{ secrets.NPM_REGISTRY_URL }}
         NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-        CLIENT_PKG_NAME: ${{ vars.CLIENT_PKG_NAME || '@ai-security-tool/anubis-react' }}
+        CLIENT_PKG_NAME: ${{ vars.CLIENT_PKG_NAME || '@ai-security-tool/electerm-react' }}
       run: |
         node -e "
         const fs = require('fs'), path = require('path')
