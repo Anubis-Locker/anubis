@@ -55,6 +55,7 @@ test('packaged Windows desktop functionality', { timeout: 180000 }, async t => {
         NODE_TEST: '',
         DATA_PATH: dataPath,
         ANUBIS_ADMIN_AUTOSTART: '0',
+        ANUBIS_ADMIN_MANAGED_ENABLED: '0',
         ANUBIS_ADMIN_ERROR_REPORT: '0'
       },
       timeout: 45000
@@ -187,7 +188,7 @@ test('packaged Windows desktop functionality', { timeout: 180000 }, async t => {
     const link = `anubis://${encodeURIComponent(TEST_USERNAME)}:${encodeURIComponent(TEST_PASSWORD)}@127.0.0.1:${port}?title=Anubis%20deep%20link%20smoke&useSshAgent=false`
     await new Promise((resolve, reject) => {
       const child = spawn(executablePath, [`--user-data-dir=${userData}`, link], {
-        env: { ...process.env, DATA_PATH: data, ANUBIS_ADMIN_AUTOSTART: '0', ANUBIS_ADMIN_ERROR_REPORT: '0' },
+        env: { ...process.env, DATA_PATH: data, ANUBIS_ADMIN_AUTOSTART: '0', ANUBIS_ADMIN_MANAGED_ENABLED: '0', ANUBIS_ADMIN_ERROR_REPORT: '0' },
         stdio: 'ignore',
         windowsHide: true
       })

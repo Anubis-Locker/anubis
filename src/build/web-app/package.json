@@ -1,6 +1,6 @@
 {
   "name": "@ai-security-tool/electerm-react",
-  "version": "5.6.11",
+  "version": "5.6.12",
   "description": "react components src for Anubis-Security-Tool",
   "main": "./client/components/main/main.jsx",
   "license": "MIT",

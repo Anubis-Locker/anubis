@@ -17,7 +17,7 @@ import LogoElem from '../common/logo-elem'
 import Placeholder from '../common/placeholder'
 import RunningTime from './app-running-time'
 import { auto } from 'manate/react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import {
   packInfo,
@@ -31,6 +31,14 @@ const e = window.translate
 
 export default auto(function InfoModal (props) {
   const [runtimeEnv, setRuntimeEnv] = useState(null)
+  const [managed, setManaged] = useState(null)
+  useEffect(() => {
+    if (!window.store.showInfoModal || window.et.isWebApp) return
+    const update = (_, value) => setManaged(value)
+    window.pre.ipcOnEvent('managed-connectivity', update)
+    window.pre.runGlobalAsync('getManagedConnectivity').then(setManaged).catch(console.error)
+    return () => window.pre.ipcOffEvent('managed-connectivity', update)
+  }, [window.store.showInfoModal])
 
   const handleChangeTab = key => {
     window.store.infoModalTab = key
@@ -175,6 +183,15 @@ export default auto(function InfoModal (props) {
           <LogoElem />
           <p className='mg2b'>{e('desc')}</p>
           <RunningTime />
+          {managed && (
+            <div className='mg1b'>
+              <CloudOutlined /> <b>Managed connectivity:</b> {managed.status}
+              {managed.fingerprint && <div>Device fingerprint: <code>{managed.fingerprint}</code></div>}
+              {managed.status === 'pending' && <div>Administrator approval is required before remote access is available.</div>}
+              {managed.url && <div><Link to={managed.url}>{managed.url}</Link></div>}
+              {managed.error && <div role='alert'>{managed.error}</div>}
+            </div>
+          )}
           <p className='mg1b'>
             <HomeOutlined /> <b>{e('homepage')}/{e('download')} ➾</b>
             <Link to={homepage} className='mg1l'>

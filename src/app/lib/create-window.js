@@ -95,6 +95,16 @@ exports.createWindow = async function (userConfig) {
 
   await initAppServer()
   initIpc()
+  if (!globalState.get('managedRuntime')) {
+    globalState.set('managedRuntime', require('./managed-startup').startDesktopManaged({
+      app: require('electron').app,
+      child: globalState.get('serverChild'),
+      port: globalState.get('config').port,
+      header: globalState.get('managedTransportSecret'),
+      globalState,
+      log: require('../common/log')
+    }))
+  }
   const port = isDev
     ? process.env.devPort || 5570
     : await getPort()

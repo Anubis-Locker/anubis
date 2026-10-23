@@ -14,6 +14,7 @@ section { background: #1b1b1b; border: 1px solid #393939; border-radius: 8px; pa
 button, input { font: inherit; color: inherit; background: #272727; border: 1px solid #555; border-radius: 5px; padding: 8px 12px; }
 button { cursor: pointer; } button:disabled { opacity: .5; cursor: wait; }
 input { width: min(400px, 80%); }
+input[type="checkbox"] { width: auto; }
 label { display: block; margin: 12px 0; }
 .muted { color: #bbb; } #message { min-height: 1.5em; } .error { color: #ffaaaa; }
 .table { overflow-x: auto; }
@@ -41,6 +42,17 @@ a { color: #9ccaff; }
 </section>
 <main id="inventory" hidden>
 <section>
+<h2>Managed devices: <span id="agent-count">0</span></h2>
+<p class="muted">New devices require approval. Verify the complete fingerprint in the local application's About panel before approving. Online means the authenticated reverse tunnel is connected and its local Web endpoint is ready. No passwords or MCP keys are uploaded.</p>
+<div class="table">
+<table>
+<thead><tr><th>Device</th><th>Application / platform</th><th>Enrollment</th><th>Presence</th><th>Actions</th></tr></thead>
+<tbody id="agent-rows"></tbody>
+</table>
+</div>
+<p id="agents-empty" hidden>No managed devices enrolled yet.</p>
+</section>
+<section>
 <div class="toolbar">
 <h2>Installations: <span id="count">0</span></h2>
 <button id="refresh" type="button">Refresh</button>
@@ -55,6 +67,11 @@ a { color: #9ccaff; }
 </table>
 </div>
 <p id="empty" hidden>No installations have reported to this server.</p>
+</section>
+<section id="mcp-access" hidden>
+<div class="toolbar"><h2 id="mcp-title"></h2><button id="close-mcp" type="button">Close MCP credentials</button></div>
+<p class="muted">Treat this temporary token as a secret. It expires after at most one hour and grants access only to this device's MCP endpoint, not its browser UI. The local authenticated MCP widget must be running; its own key never leaves the device.</p>
+<pre id="mcp-credentials"></pre>
 </section>
 <section id="history" hidden>
 <div class="toolbar"><h2 id="history-title"></h2><button id="close-history" type="button">Close history</button></div>
@@ -71,6 +88,8 @@ let generation = 0
 let timer
 let controller
 let selected = ''
+let selectedMcp = ''
+let mcpGeneration = 0
 
 function message (text, failed = false) {
   element('message').textContent = text
@@ -93,10 +112,13 @@ function signOut () {
   generation++
   token = ''
   selected = ''
+  closeMcp()
   clearTimeout(timer)
   controller?.abort()
   element('token').value = ''
   element('rows').replaceChildren()
+  element('agent-rows').replaceChildren()
+  element('agent-count').textContent = '0'
   element('reports').replaceChildren()
   element('count').textContent = '0'
   element('updated').textContent = ''
@@ -108,8 +130,17 @@ function signOut () {
   element('refresh').disabled = false
 }
 
-async function request (route, session, signal) {
+function closeMcp () {
+  mcpGeneration++
+  selectedMcp = ''
+  element('mcp-title').textContent = ''
+  element('mcp-credentials').textContent = ''
+  element('mcp-access').hidden = true
+}
+
+async function request (route, session, signal, method = 'GET') {
   const response = await fetch(route, {
+    method,
     headers: { Authorization: 'Bearer ' + token },
     cache: 'no-store',
     redirect: 'error',
@@ -123,6 +154,125 @@ async function request (route, session, signal) {
   }
   if (!response.ok) throw new Error('Management API returned HTTP ' + response.status)
   return response.json()
+}
+
+async function changeAgent (agent, action) {
+  const session = generation
+  try {
+    const result = await request('/api/agents/' + encodeURIComponent(agent.id) + '/' + action, session, undefined, 'POST')
+    if (result && session === generation) {
+      if (action === 'revoke' && selectedMcp === agent.id) closeMcp()
+      await refresh()
+    }
+  } catch (error) {
+    if (session === generation) message('Device action failed: ' + error.message, true)
+  }
+}
+
+function agentUrl (value, agent, pathname = '/') {
+  const url = new URL(value)
+  const expected = 'device-' + agent.id.replace(/-/g, '') + '.anubis.locker'
+  if (url.protocol !== 'https:' || url.hostname !== expected || url.port ||
+      url.username || url.password || url.search || url.hash || url.pathname !== pathname) {
+    throw new Error('Invalid managed device origin')
+  }
+  return url
+}
+
+async function openMcp (agent) {
+  const session = generation
+  closeMcp()
+  const selection = mcpGeneration
+  try {
+    const result = await request('/api/agents/' + encodeURIComponent(agent.id) + '/mcp-token', session, undefined, 'POST')
+    if (!result || session !== generation || selection !== mcpGeneration) return
+    const url = agentUrl(result.url, agent, '/mcp')
+    if (result.scope !== 'mcp' || typeof result.token !== 'string' ||
+        !/^[0-9a-f]{64}$/.test(result.token) || !Number.isFinite(result.expiresAt)) {
+      throw new Error('Invalid managed MCP credentials')
+    }
+    selectedMcp = agent.id
+    element('mcp-title').textContent = 'MCP access: ' + agent.label
+    element('mcp-credentials').textContent = 'URL: ' + url.href +
+      '\nAuthorization: Bearer ' + result.token + '\nExpires: ' + timestamp(result.expiresAt)
+    element('mcp-access').hidden = false
+  } catch (error) {
+    if (session === generation && selection === mcpGeneration) message('Unable to issue MCP access: ' + error.message, true)
+  }
+}
+
+async function openAgent (agent) {
+  const session = generation
+  const panel = window.open('about:blank', '_blank')
+  if (!panel) return message('Allow a new tab to open this device.', true)
+  panel.opener = null
+  try {
+    const result = await request('/api/agents/' + encodeURIComponent(agent.id) + '/connect', session, undefined, 'POST')
+    if (!result || session !== generation) return panel.close()
+    const url = agentUrl(result.url, agent)
+    const response = await fetch(url.origin + '/_anubis/connect', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      credentials: 'include',
+      redirect: 'error',
+      signal: AbortSignal.timeout(10000),
+      body: JSON.stringify({ ticket: result.ticket })
+    })
+    if (!response.ok) throw new Error('Connection ticket rejected: HTTP ' + response.status)
+    if (session !== generation) return panel.close()
+    panel.location.href = url.href
+  } catch (error) {
+    panel.close()
+    if (session === generation) message('Unable to connect to device: ' + error.message, true)
+  }
+}
+
+function renderAgents (agents) {
+  if (selectedMcp && !agents.some(agent => agent.id === selectedMcp && agent.status === 'approved')) closeMcp()
+  const checked = new Set(Array.from(element('agent-rows').querySelectorAll('input:checked')).map(input => input.value))
+  element('agent-rows').replaceChildren()
+  element('agent-count').textContent = agents.length
+  element('agents-empty').hidden = agents.length !== 0
+  for (const agent of agents) {
+    const row = text(element('agent-rows'), 'tr', '')
+    const name = text(row, 'td', agent.label)
+    text(name, 'small', agent.id)
+    const application = text(row, 'td', agent.app + ' ' + agent.version)
+    text(application, 'small', agent.platform + ' ' + agent.arch)
+    const enrollment = text(row, 'td', agent.status)
+    text(enrollment, 'small', 'SHA-256 fingerprint')
+    text(enrollment, 'code', agent.fingerprint)
+    const presence = text(row, 'td', agent.online ? 'Online' : 'Offline')
+    text(presence, 'small', agent.lastSeen ? timestamp(agent.lastSeen) : 'No authenticated signal')
+    const actions = text(row, 'td', '')
+    if (agent.status !== 'approved') {
+      const label = text(actions, 'label', '')
+      const verified = document.createElement('input')
+      verified.type = 'checkbox'
+      verified.value = agent.id
+      verified.checked = checked.has(agent.id)
+      label.append(verified)
+      text(label, 'span', 'Fingerprint verified locally')
+      const approve = text(actions, 'button', 'Approve')
+      approve.disabled = !verified.checked
+      verified.addEventListener('change', () => { approve.disabled = !verified.checked })
+      approve.addEventListener('click', () => changeAgent(agent, 'approve'))
+    } else {
+      const open = text(actions, 'button', 'Open device')
+      open.disabled = !agent.online
+      open.addEventListener('click', () => openAgent(agent))
+      const mcp = text(actions, 'button', 'MCP access')
+      mcp.disabled = !agent.online
+      mcp.addEventListener('click', () => openMcp(agent))
+      const revoke = text(actions, 'button', 'Revoke')
+      revoke.addEventListener('click', () => {
+        if (revoke.dataset.confirm !== 'yes') {
+          revoke.dataset.confirm = 'yes'
+          revoke.textContent = 'Confirm revoke'
+        } else changeAgent(agent, 'revoke')
+      })
+    }
+  }
 }
 
 function access (cell, report) {
@@ -208,10 +358,15 @@ async function refresh () {
   element('refresh').disabled = true
   element('sign-in').disabled = true
   try {
-    const data = await request('/api/installs', session, pending.signal)
-    if (!data || session !== generation) return
+    const [data, managed] = await Promise.all([
+      request('/api/installs', session, pending.signal),
+      request('/api/agents', session, pending.signal)
+    ])
+    if (!data || !managed || session !== generation) return
     if (!Array.isArray(data.installs)) throw new Error('Invalid installation inventory response')
+    if (!Array.isArray(managed.agents)) throw new Error('Invalid managed device response')
     render(data.installs)
+    renderAgents(managed.agents)
     element('token').value = ''
     element('login').hidden = true
     element('inventory').hidden = false
@@ -236,6 +391,7 @@ element('login-form').addEventListener('submit', event => {
   refresh()
 })
 element('refresh').addEventListener('click', refresh)
+element('close-mcp').addEventListener('click', closeMcp)
 element('sign-out').addEventListener('click', () => {
   signOut()
   message('Signed out.')

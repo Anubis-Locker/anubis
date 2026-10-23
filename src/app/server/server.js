@@ -9,7 +9,31 @@ const {
 const initFileServer = require('../lib/file-server')
 const appDec = require('./app-wrap')
 
+const managedRpc = process.env.ANUBIS_MANAGED_TRANSPORT_SECRET
+  ? require('./managed-rpc').createRpcChannel(process)
+  : null
+if (managedRpc) {
+  app.all('/mcp', require('./managed-mcp').createManagedMcpProxy({
+    secret: process.env.ANUBIS_MANAGED_TRANSPORT_SECRET,
+    rpc: managedRpc.call
+  }))
+}
 appDec(app)
+
+if (managedRpc) {
+  const { initManagedBrowser } = require('./managed-browser')
+  const browser = initManagedBrowser(app, {
+    secret: process.env.ANUBIS_MANAGED_TRANSPORT_SECRET,
+    rpc: managedRpc.call,
+    nativeToken: process.env.tokenElecterm,
+    getSessionPort: require('./session-process').getSessionPort
+  })
+  process.on('message', message => {
+    if (message?.type === 'managed-auth-changed') browser.invalidateSessions()
+  })
+  process.once('disconnect', () => browser.close())
+  process.once('exit', () => browser.close())
+}
 
 app.get('/run', function (req, res) {
   res.send('ok')

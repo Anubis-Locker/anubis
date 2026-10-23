@@ -56,6 +56,7 @@ test('packaged Unix desktop functionality', {
         NODE_TEST: '',
         DATA_PATH: join(root, 'data'),
         ANUBIS_ADMIN_AUTOSTART: '0',
+        ANUBIS_ADMIN_MANAGED_ENABLED: '0',
         ANUBIS_ADMIN_ERROR_REPORT: '0'
       },
       timeout: 45000

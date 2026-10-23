@@ -81,6 +81,7 @@ test('packaged live Spice and private GitHub sync', {
       NODE_TEST: '',
       DATA_PATH: data,
       ANUBIS_ADMIN_AUTOSTART: '0',
+      ANUBIS_ADMIN_MANAGED_ENABLED: '0',
       ANUBIS_ADMIN_ERROR_REPORT: '0',
       ANUBIS_ADMIN_MCP_ENABLED: '0'
     },

@@ -158,12 +158,35 @@ async function initAppServer () {
   config.language = language
   globalState.set('langMap', langMap)
   if (!globalState.get('serverInited')) {
+    const transportSecret = require('./managed-access').createTransportSecret()
     const child = await initServer(config, {
       ...process.env,
       appPath,
-      sshKeysPath
+      sshKeysPath,
+      ANUBIS_MANAGED_TRANSPORT_SECRET: transportSecret
     }, sysLocale)
+    globalState.set('managedTransportSecret', transportSecret)
+    globalState.set('serverChild', child)
     child.on('message', (m) => {
+      if (m?.type === 'managed-rpc') {
+        const dispatch = globalState.get('managedBrowserRpc')
+        Promise.resolve().then(() => {
+          if (m.func === 'managedMcpEndpoint') {
+            return require('../widgets/load-widget').getManagedMcpEndpoint()
+          }
+          if (!dispatch) throw new Error('Managed desktop dispatcher is not ready')
+          return dispatch(m.func, m.args)
+        }).then(
+          data => {
+            if (child.connected) child.send({ type: 'managed-rpc-result', id: m.id, data })
+          },
+          error => {
+            log.warn('Managed desktop RPC rejected:', error.message)
+            if (child.connected) child.send({ type: 'managed-rpc-result', id: m.id, error: error.message })
+          }
+        ).catch(error => log.warn('Managed desktop IPC failed:', error.message))
+        return
+      }
       closeForUpgrade(m, isWin, globalState)
       if (m && m.showFileInFolder) {
         if (!isMac) {
@@ -233,10 +256,16 @@ function initIpc () {
     }
   })
   const asyncGlobals = {
+    getManagedConnectivity: () => globalState.get('managedConnectivity') || { status: 'offline' },
     confirmExit: () => {
       globalState.set('confirmExit', true)
     },
-    setPassword,
+    setPassword: async password => {
+      const result = await setPassword(password)
+      const child = globalState.get('serverChild')
+      if (child?.connected) child.send({ type: 'managed-auth-changed' })
+      return result
+    },
     checkPassword,
     lookup,
     loadSshConfig,
@@ -341,6 +370,33 @@ function initIpc () {
       )
     }
   }
+  globalState.set('managedBrowserRpc', require('./managed-browser-rpc').createBrowserRpc({
+    functions: asyncGlobals,
+    getConfig: () => globalState.get('config'),
+    getPassword: require('./get-config').getDbConfig,
+    constants: () => {
+      const props = ipcSyncFuncs.getConstants()
+      return {
+        ...props,
+        brand: require('../common/brand'),
+        fsConstants: require('fs').constants,
+        osInfoData: ipcSyncFuncs.osInfo(),
+        versions: JSON.parse(props.versions)
+      }
+    },
+    init: async () => {
+      const { langs, langMap } = await loadLocales()
+      return {
+        config: globalState.get('config'),
+        langs,
+        langMap,
+        installSrc,
+        appPath,
+        isPortable,
+        widgetLogPath: widgetLog.getLogDir()
+      }
+    }
+  }))
   ipcMain.handle('async', (event, { name, args }) => {
     if (!isTrustedIpcSender(event) || !isExportedIpcFunc(asyncGlobals, name)) {
       console.error('[security] blocked IPC call: ' + name)

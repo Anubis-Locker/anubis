@@ -119,6 +119,34 @@ test('management filters history by exact installation before applying the limit
   }
 })
 
+test('managed device enrollment is pending until an authenticated administrator approves its fingerprint', async t => {
+  const f = await fixture(t)
+  const id = crypto.randomUUID()
+  const secret = crypto.randomBytes(32).toString('hex')
+  const enrollment = await f.request('/api/agents/enroll', {
+    method: 'POST',
+    body: JSON.stringify({ id, secret, app: 'anubis-desktop', version: '5.6.12' })
+  })
+  assert.equal(enrollment.status, 201)
+  assert.equal((await enrollment.json()).status, 'pending')
+  assert.equal((await f.request('/api/agents')).status, 401)
+  assert.equal((await f.request('/api/agents/' + id + '/approve', { method: 'POST' })).status, 401)
+  let response = await f.request('/api/agents', { headers: f.admin })
+  let device = (await response.json()).agents[0]
+  assert.equal(device.online, false)
+  assert.equal(device.fingerprint, crypto.createHash('sha256').update(secret).digest('hex'))
+  assert.ok(!JSON.stringify(device).includes(secret))
+  response = await f.request('/api/agents/' + id + '/approve', { method: 'POST', headers: f.admin })
+  assert.equal(response.status, 200)
+  device = await response.json()
+  assert.equal(device.status, 'approved')
+  assert.equal(device.online, false)
+  assert.equal(device.url, undefined)
+  assert.equal((await f.request('/api/agents/' + id + '/connect', { method: 'POST', headers: f.admin })).status, 503)
+  response = await f.request('/api/agents/' + id + '/revoke', { method: 'POST', headers: f.admin })
+  assert.equal((await response.json()).status, 'revoked')
+})
+
 test('management rejects malformed reports and invalid history limits', async t => {
   const f = await fixture(t)
   for (const payload of [null, [], {}, { installId: [] }, { installId: ' ' }, { installId: 'a'.repeat(129) }]) {

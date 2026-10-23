@@ -85,7 +85,7 @@ GitHub services:
 | Update/release site | version check, release JSON, install scripts | `update.` / `download.anubis.locker` |
 | Sync server | settings/connections sync (replaces gist/webdav defaults) | `sync.anubis.locker` |
 | AI stub | OpenAI/Anthropic-compatible chat endpoint (placeholder reply today, pluggable later) | `ai.anubis.locker` |
-| Management API | receives install/error reports, lists installed instances | `api.anubis.locker` |
+| Management API / gateway | reports, approved device enrollment, live presence and authenticated remote browser/MCP access | `api.anubis.locker` |
 | Docs / theme mirror | wiki pages and iTerm-style theme catalogue | `docs.` / `theme.anubis.locker` |
 | Demo | browser-based demo (electerm-web) with VNC/MCP | `demo.anubis.locker` |
 
@@ -210,7 +210,9 @@ Reverse-proxy `/api/ai` on `ai.anubis.locker` to this service. Both ordinary
 JSON and OpenAI/Anthropic SSE requests return the same explicit placeholder,
 not generated commands or bookmarks; a real model is still required for those.
 
-The management API source is `services\management-api.js`; run it with
+The management API source is `services\management-api.js`. Install its small
+server-only dependency set with
+`npm ci --prefix services --omit=dev --ignore-scripts`, then run
 `node services\management-api.js`. It binds loopback on `PORT` (default 7106),
 persists reports in `DATA_DIR` (default `/var/lib/anubis-mgmt`) and accepts desktop
 reports at `POST /api/report`. Configure `ADMIN_TOKEN` only on the server:
@@ -221,28 +223,77 @@ instead of acknowledging a report that was not saved.
 
 The administrator inventory is available at
 `https://api.anubis.locker/admin` (or `/admin` on your management API host).
-Deploy `services\management-dashboard.html` alongside `management-api.js`.
+Deploy `services\management-dashboard.html`, `services\package.json` and its lock
+alongside `management-api.js` (renamed `server.js` on the hosted service).
 Sign in using the server's management administrator token, not a desktop MCP
 token. The dashboard keeps this token only in tab memory and refreshes every
 10 seconds. It lists the last report for each installation and opens its
 filtered error/report history; `GET /api/reports?installId=<id>&limit=50`
 requires the same administrator authentication.
 
-This inventory is **not a remote-control gateway**. An installation ID identifies
-an application profile, so test profiles and multiple profiles on one PC produce
-separate entries. Desktop 5.6.11 reports at startup; its last report must not be
-presented as live online status. It does not publish a remote Web endpoint or
-upload SSH/RDP/VNC/MCP passwords. If a reporting component explicitly supplies
-`meta.connection.webUrl`, the dashboard can display an HTTPS address under
-`*.anubis.locker`, without embedded credentials or query parameters, and labels
-it as unverified. A working authenticated Web companion and reverse tunnel are
-still required for remote browser access. No install/update/restart commands are
-dispatched by this read-only inventory.
+The **Managed devices** section is separate from historical reports. New managed
+installations create a private per-instance UUID and random credential; the
+controller stores its SHA-256 fingerprint, never the credential. The first
+enrollment is pending. Compare the full fingerprint with the local application,
+check **Fingerprint verified locally**, and approve it. Unknown or revoked
+instances cannot open a tunnel. Approved instances reconnect automatically;
+**Online** requires both a real authenticated reverse connection and a successful
+local Web readiness probe, not merely a recent report.
+
+**Open device** creates a one-use, 30-second ticket. The browser exchanges it over
+HTTPS POST for a host-only HttpOnly/Secure session cookie on the isolated
+`device-<UUID-without-hyphens>.anubis.locker` origin. Neither administrator
+credentials nor tickets appear in URLs. HTTP bodies and WebSocket sessions use
+authenticated outbound channels, without opening inbound ports on the PC.
+**Revoke** closes active channels and invalidates existing browser sessions.
+Standalone Web user authentication remains an additional boundary. Enrollment and
+reports do not contain SSH/RDP/VNC passwords or local service tokens. Authorized
+application traffic travels through a trusted TLS-terminating gateway; this is
+not end-to-end encryption against the gateway operator. This gateway does not dispatch arbitrary
+install/update/restart tasks; application updates use the existing release updater.
+
+Desktop 5.6.12 enables managed enrollment by default. Its private identity is
+`app.getPath('userData')\managed-access-identity.json`; the native About panel
+shows status and the complete fingerprint. Administrator environment overrides
+are `ANUBIS_ADMIN_MANAGED_ENABLED=0` and `ANUBIS_ADMIN_MANAGED_URL`.
+An existing desktop password remains an additional browser login requirement.
+Changing that password invalidates browser sessions without revoking the device.
+
+**MCP access** issues a separate temporary token and HTTPS `/mcp` URL for one
+approved online device. Configure external MCP clients with
+`Authorization: Bearer <temporary token>`. The grant lasts at most one hour and
+permits only GET/POST/DELETE on that exact endpoint, not the browser UI, controller
+API or WebSockets. The local authenticated MCP widget must actually be running.
+Its local token is inserted on the device, never returned to the controller.
+Expiration closes active HTTP/SSE streams; device revocation cancels all grants.
+Desktop MCP is a separate administrative capability acting on the native store,
+not a means of unlocking browser data or bypassing OS-backed encryption.
+
+The server requires a wildcard DNS A record for `*.anubis.locker` and a matching
+TLS certificate. Include `services\nginx-managed-gateway.conf` in the Nginx HTTP
+configuration and `services\nginx-managed-agent-location.conf` in the API virtual
+host. The supplied files use the hosted VPS address/certificate paths; adjust
+these for another deployment. They match only the reserved `device-` host prefix
+and managed API paths, not the main website or existing demo. Keep WebSocket
+upgrade forwarding and long data-channel timeouts: a short generic proxy timeout
+would disconnect idle remote terminals. The client enforces HTTPS except for
+explicit loopback test origins.
+
+The shared transport is
+[`@ai-security-tool/managed-access`](https://github.com/Anubis-Locker/anubis-managed-access),
+published only to our registry. Its authenticated API is `GET /api/agents` and
+administrator `POST /api/agents/<id>/approve`, `/connect`, `/mcp-token`, `/revoke`; first
+enrollment uses `POST /api/agents/enroll`, then the per-instance credential
+authenticates control/data WebSockets. First enrollment alone is not proof of
+machine ownership: local fingerprint verification remains mandatory.
 
 The login uses the existing `ADMIN_TOKEN` in the `anubis-mgmt-api` server
 service configuration; a token for another management host is not reused.
-Client reports currently have no per-device enrollment authentication, so
-reported identities, fields and addresses are not proof of machine ownership.
+The historical **Installations** section remains compatible with 5.6.11.
+Its `installId` identifies an application profile, not necessarily a unique PC.
+Those older reports have no device authentication and startup-only heartbeats,
+so they are not treated as live managed presence. Optional reported Web addresses
+are explicitly unverified; they cannot authorize a managed tunnel.
 Run the focused API/browser checks with
 `node --test src/test/unit-ci/management-api.spec.js src/test/integration/management-dashboard.spec.js`.
 The browser check uses the declared Playwright dependency and its Chromium

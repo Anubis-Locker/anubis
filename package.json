@@ -1,6 +1,6 @@
 {
   "name": "anubis",
-  "version": "5.6.11",
+  "version": "5.6.12",
   "description": "Anubis-Security-Tool: terminal/ssh/sftp/telnet/serialport/RDP/VNC/Spice/ftp client (Linux, macOS, Windows).",
   "main": "app.js",
   "scripts": {
@@ -87,7 +87,6 @@
     "lucide-react": "^1.61.0",
     "manate": "2.0.3",
     "morgan": "^1.12.0",
-    "multer": "^2.3.0",
     "pug": "3.0.4",
     "react": "19.2.7",
     "react-diff-viewer-continued": "4.4.0",
@@ -102,6 +101,8 @@
     "vite": "8.1.0"
   },
   "dependencies": {
+    "@ai-security-tool/managed-access": "1.0.1",
+    "@ai-security-tool/anubis-browser-assets": "5.6.11",
     "@ai-security-tool/ftp-srv": "^1.0.6",
     "@ai-security-tool/locales": "2.3.34",
     "@ai-security-tool/nedb": "2.0.0",
@@ -125,6 +126,7 @@
     "iconv-lite": "^0.7.2",
     "json-deep-copy": "1.3.1",
     "jsonwebtoken": "^9.0.1",
+    "multer": "^2.3.0",
     "nanoid": "^3.3.16",
     "node-bash": "5.0.1",
     "node-forge": "1.4.0",
@@ -136,7 +138,8 @@
     "socksv5-server": "^1.0.2",
     "ssh-config-loader": "1.1.2",
     "tar": "7.5.21",
-    "zmodem2": "1.4.0"
+    "zmodem2": "1.4.0",
+    "ws": "8.18.3"
   },
   "overrides": {
     "ip-address": "^10.3.1",

@@ -60,6 +60,11 @@ require('fs').writeFileSync(
 
 cp('.npmrc', 'work/app/.npmrc')
 runChecked('npm i --omit=dev --legacy-peer-deps')
+// yarn autoclean removes dependency folders named assets/images. Stage the
+// complete browser tree outside node_modules before that cleanup runs.
+require('./browser-assets').stageBrowserAssets({
+  destination: resolve(cwd, 'work/app/browser-assets')
+})
 rm('-rf', 'work/app/node_modules/.bin')
 // Remove axios browser/ESM builds and unnecessary files (keep only lib/ and node CJS)
 rm('-rf', 'work/app/node_modules/axios/dist/esm')

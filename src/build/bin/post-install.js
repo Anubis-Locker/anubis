@@ -40,6 +40,14 @@ try {
 // rebuild never runs on a checkout under e.g. C:\Users\me\Project Code\electerm.
 exec(`"${resolve(__dirname, '../../../node_modules/.bin/electron-rebuild')}"`)
 
+if (isWin) {
+  const ptyDir = resolve(__dirname, '../../../node_modules/node-pty')
+  const releaseDir = resolve(ptyDir, 'build/Release')
+  if (existsSync(resolve(releaseDir, 'conpty.node'))) {
+    require('./windows-terminal-runtime').copyWindowsTerminalRuntime(ptyDir, releaseDir, process.arch)
+  }
+}
+
 if (!existsSync(prePushPath)) {
   cp(prePushPathFrom, prePushPath)
 }

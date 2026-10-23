@@ -30,6 +30,7 @@ test('same-version reinstall replaces cached entry modules without losing user d
     NODE_TEST: '',
     DATA_PATH: join(root, 'data'),
     ANUBIS_ADMIN_AUTOSTART: '0',
+    ANUBIS_ADMIN_MANAGED_ENABLED: '0',
     ANUBIS_ADMIN_ERROR_REPORT: '0'
   }
   const protocols = snapshotWindowsProtocols(root, [root, executablePath])

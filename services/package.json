@@ -1,0 +1,8 @@
+{
+  "name": "anubis-services",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "@ai-security-tool/managed-access": "1.0.2"
+  }
+}

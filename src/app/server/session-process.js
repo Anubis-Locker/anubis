@@ -44,6 +44,7 @@ async function runSessionServer (type, port) {
   return new Promise((resolve) => {
     const cleanEnv = Object.assign({}, process.env)
     delete cleanEnv.ELECTRON_RUN_AS_NODE
+    delete cleanEnv.ANUBIS_MANAGED_TRANSPORT_SECRET
     const child = fork(path.resolve(__dirname, './session-server.js'), {
       env: Object.assign(
         {
@@ -336,6 +337,10 @@ exports.terminals = function (pid) {
       }, 10000).catch(() => {})
     }
   }
+}
+
+exports.getSessionPort = function (pid) {
+  return activeTerminals.get(pid)?.port
 }
 
 /**

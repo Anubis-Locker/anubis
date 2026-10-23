@@ -152,6 +152,14 @@ function stopWidget (instanceId) {
     })
 }
 
+function getManagedMcpEndpoint () {
+  const { managedMcpEndpoint } = require('./widget-mcp-server')
+  for (const instance of runningInstances.values()) {
+    if (instance.widgetId === 'mcp-server') return instance[managedMcpEndpoint]()
+  }
+  throw new Error('Administrator-managed MCP is not running')
+}
+
 async function runWidgetFunc (instanceId, funcName, ...args) {
   const instance = runningInstances.get(instanceId)
   if (!instance) {
@@ -219,5 +227,6 @@ module.exports = {
   listWidgets,
   runWidget,
   stopWidget,
-  runWidgetFunc
+  runWidgetFunc,
+  getManagedMcpEndpoint
 }

@@ -136,3 +136,73 @@ test('management dashboard authenticates, isolates history and never treats repo
   assert.ok(requests.every(request => !request.url.includes(adminToken)))
   assert.deepEqual(errors, [])
 })
+
+test('managed MCP credentials validate their origin and clear on close, revocation and sign-out', { timeout: 60000 }, async t => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'anubis-inventory-browser-'))
+  const adminToken = 'inventory-mcp-test-token'
+  const server = createServer({ dataDir, adminToken })
+  let browser = null
+  t.after(async () => {
+    if (browser) await browser.close()
+    await new Promise(resolve => server.close(resolve))
+    fs.rmSync(dataDir, { recursive: true, force: true })
+  })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  const base = `http://127.0.0.1:${server.address().port}`
+  const agent = {
+    id: '00000000-0000-4000-8000-000000000001',
+    label: 'Managed MCP fixture',
+    app: 'anubis-desktop',
+    version: '5.6.12',
+    status: 'approved',
+    online: true
+  }
+  const credential = 'a'.repeat(64)
+  let url = 'https://untrusted.invalid/mcp'
+  browser = await chromium.launch({ headless: true })
+  const page = await browser.newPage()
+  const errors = []
+  const requests = []
+  page.on('pageerror', error => errors.push(error.message))
+  page.on('request', request => requests.push(request.url()))
+  await page.route('**/api/agents', route => route.fulfill({ json: { agents: [agent] } }))
+  await page.route('**/api/agents/*/mcp-token', route => {
+    assert.equal(route.request().method(), 'POST')
+    assert.equal(route.request().headers().authorization, 'Bearer ' + adminToken)
+    return route.fulfill({ json: { url, token: credential, scope: 'mcp', expiresAt: Date.now() + 3600000 } })
+  })
+  await page.goto(base + '/admin')
+  await page.locator('#token').fill(adminToken)
+  await page.locator('#sign-in').click()
+  const mcp = page.getByRole('button', { name: 'MCP access', exact: true })
+  await mcp.click()
+  await expect(page.locator('#message')).toContainText('Invalid managed device origin')
+  await expect(page.locator('#mcp-access')).toBeHidden()
+  url = 'https://device-' + agent.id.replace(/-/g, '') + '.anubis.locker/mcp'
+  await mcp.click()
+  await expect(page.locator('#mcp-credentials')).toContainText('Authorization: Bearer ' + credential)
+  await expect(page.locator('#mcp-credentials')).toContainText(url)
+  await page.locator('#close-mcp').click()
+  await expect(page.locator('#mcp-credentials')).toHaveText('')
+  await mcp.click()
+  await expect(page.locator('#mcp-access')).toBeVisible()
+  agent.status = 'revoked'
+  agent.online = false
+  await page.locator('#refresh').click()
+  await expect(page.locator('#mcp-access')).toBeHidden()
+  await expect(page.locator('#mcp-credentials')).toHaveText('')
+  agent.status = 'approved'
+  agent.online = true
+  await page.locator('#refresh').click()
+  await mcp.click()
+  await expect(page.locator('#mcp-access')).toBeVisible()
+  await page.locator('#sign-out').click()
+  await expect(page.locator('#mcp-access')).toBeHidden()
+  await expect(page.locator('#mcp-credentials')).toHaveText('')
+  assert.deepEqual(await page.evaluate(() => ({
+    local: Object.keys(window.localStorage),
+    session: Object.keys(window.sessionStorage)
+  })), { local: [], session: [] })
+  assert.ok(requests.every(url => url.startsWith(base) && !url.includes(adminToken) && !url.includes(credential)))
+  assert.deepEqual(errors, [])
+})

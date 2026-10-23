@@ -66,6 +66,9 @@ async function checkUIDataFlows (page, t) {
   if (await close.isVisible()) await close.click()
   await t.test('a saved quick command actually executes in the terminal', async () => {
     await page.locator('.session-current .xterm-helper-textarea').waitFor()
+    if (process.platform === 'win32') {
+      await page.waitForFunction(() => /PS [^\r\n]*>/.test(document.querySelector('.session-current')?.innerText || ''))
+    }
     await page.locator('.quick-command-trigger-wrap .ant-btn').click()
     await page.locator('.qm-item').filter({ hasText: names.command }).first().click()
     await page.waitForFunction(() => document.body.innerText.includes('ANUBIS_UI_QUICK_COMMAND_OK'))

@@ -5,6 +5,7 @@ const http = require('node:http')
 const fs = require('node:fs')
 const path = require('node:path')
 const crypto = require('node:crypto')
+const { createGateway } = require('@ai-security-tool/managed-access/server')
 
 function json (res, status, body) {
   const data = JSON.stringify(body)
@@ -51,7 +52,7 @@ function createServer ({
     "default-src 'none'",
     `script-src ${hashes('script')}`,
     `style-src ${hashes('style')}`,
-    "connect-src 'self'",
+    "connect-src 'self' https://*.anubis.locker",
     "base-uri 'none'",
     "form-action 'none'",
     "frame-ancestors 'none'"
@@ -68,8 +69,10 @@ function createServer ({
   function reports () {
     return fs.readFileSync(reportsFile, 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line))
   }
-  return http.createServer(async (req, res) => {
+  const gateway = createGateway({ dataDir, isAdmin })
+  const server = http.createServer(async (req, res) => {
     try {
+      if (await gateway.handle(req, res)) return
       const url = new URL(req.url, 'http://localhost')
       const route = url.pathname
       if (req.method === 'OPTIONS') return json(res, 204, {})
@@ -144,6 +147,17 @@ function createServer ({
       res.destroy(error)
     }
   })
+  server.managedGateway = gateway
+  server.on('upgrade', (req, socket, head) => {
+    gateway.upgrade(req, socket, head).catch(error => {
+      console.error('Managed gateway upgrade failed:', error.message)
+      socket.destroy()
+    })
+  })
+  server.on('close', () => {
+    gateway.close().catch(error => console.error('Managed gateway shutdown failed:', error.message))
+  })
+  return server
 }
 
 if (require.main === module) {

@@ -1389,6 +1389,8 @@ function applyAdminMcp (config) {
   return true
 }
 
+const managedMcpEndpoint = Symbol('managedMcpEndpoint')
+
 function widgetRun (instanceConfig, ctx = {}) {
   const config = { ...getDefaultConfig(), ...instanceConfig }
   // admin policy: the token is generated per installation and cannot be
@@ -1398,6 +1400,18 @@ function widgetRun (instanceConfig, ctx = {}) {
 
   return {
     instanceId: mcpServer.instanceId,
+    [managedMcpEndpoint]: () => {
+      const { getAdminPolicy, getMcpToken } = require('../common/admin-policy')
+      if (!getAdminPolicy().values.mcpServerEnabled || !mcpServer.httpServer?.listening) {
+        throw new Error('Administrator-managed MCP is disabled or not running')
+      }
+      const address = mcpServer.httpServer.address()
+      if (!address || !['127.0.0.1', '::1'].includes(address.address) ||
+          config.apiKey !== getMcpToken()) {
+        throw new Error('MCP listener is not administrator-managed loopback')
+      }
+      return { host: address.address, port: address.port, token: config.apiKey }
+    },
     start: () => mcpServer.start().then(res => {
       if (adminManaged && res && res.serverInfo) {
         res.serverInfo.apiKey = undefined
@@ -1412,5 +1426,6 @@ function widgetRun (instanceConfig, ctx = {}) {
 module.exports = {
   widgetInfo,
   widgetRun,
+  managedMcpEndpoint,
   _ElectermMCPServer: ElectermMCPServer
 }

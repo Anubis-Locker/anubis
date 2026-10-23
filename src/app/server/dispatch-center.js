@@ -26,6 +26,7 @@ const wsDec = require('./ws-dec')
 const { tokenElecterm } = process.env
 
 function verify (req) {
+  if (req.managedSession) return
   const { token: to } = req.query
   if (to !== tokenElecterm) {
     throw new Error('not valid request')
@@ -77,12 +78,24 @@ const initWs = function (app) {
   // common functions
   app.ws('/common/s', (ws, req) => {
     verify(req)
+    if (req.managedSession) {
+      const expiry = setTimeout(() => ws.close(1008, 'Desktop session expired'), req.managedSession.expires - Date.now())
+      ws.once('close', () => clearTimeout(expiry))
+    }
     wsDec(ws)
     ws.on('message', async (message) => {
       try {
         const msg = JSON.parse(message)
         const { action } = msg
-        if (action === 'fetch') {
+        if (action === 'runSync' && req.managedSession) {
+          try {
+            const data = await req.managedRpc(msg.func, msg.args)
+            ws.s({ id: msg.id, data })
+          } catch (error) {
+            log.warn('Managed browser RPC failed:', error.message)
+            ws.s({ id: msg.id, error: { message: error.message } })
+          }
+        } else if (action === 'fetch') {
           fetch(ws, msg)
         } else if (action === 'sync') {
           sync(ws, msg)
