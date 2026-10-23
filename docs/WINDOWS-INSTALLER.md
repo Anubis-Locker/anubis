@@ -32,7 +32,7 @@ administrator's UAC approval is usable because setup modifies no user profile.
 
 New installations authorize **no user workers** by default. An administrator
 may explicitly supply `/ALLOWUSERSIDS=S-1-5-21-111-222-333-1001` (comma-separated
-canonical account SIDs for several users). This is initial provisioning only;
+canonical account SIDs for several users). This is service provisioning only;
 updates reject a nonempty allow-list option rather than replacing retained
 authorization. No logged-on user is automatically authorized. The native host
 still requires an authorized user to be logged on, and broker operations require
@@ -44,7 +44,8 @@ User profiles, bookmarks, DPAPI credentials and managed identity state are never
 copied into SYSTEM. The stable machine profile is created separately by the
 native host under its protected ProgramData root. Fresh SYSTEM enrollment may
 need **separate approval** from the management service; readiness does not imply
-enrollment/approval. Setup performs no migration, enrollment or auto-approval.
+enrollment/approval. Setup never copies user data or performs enrollment or
+auto-approval; explicit migration only transitions the registrations described below.
 `--delete-app-data` is rejected; uninstall retains host config/data and every
 legacy/user profile. Reinstallation must match the native retained config
 (including the original explicitly supplied SID list); mismatches fail closed.
@@ -100,7 +101,9 @@ Normal prepare copies all `src\app` files, including machine-client HTML, UI and
 preload. The Windows x64 after-pack hook compiles `native\windows-host` using
 Go >=1.26 (`ANUBIS_GO` may select an explicit executable), verifies amd64 PE
 format and places `anubis-host.exe` beside `anubis.exe` before package signing.
-CI installs Go from `go.mod`; it never relies on ignored `native\windows-host\out`.
+The module's Go 1.26.0 declaration is a compatibility minimum, not the release
+compiler choice. Windows release workflows pin Go **1.27.3** and LF native
+source/module inputs; they never rely on ignored `native\windows-host\out`.
 
 Portable EXE, tar/loose archives and AppX packages never receive the installation
 marker and **do not provide a machine service**. They retain personal standalone
@@ -328,3 +331,69 @@ interactive Root administrator. This is not production or release acceptance,
 does not validate a later version/build, and does not cover reboot persistence,
 other Windows users or non-elevated UAC approval/cancellation. This packaging
 task performed no installer execution.
+
+### Stable 5.7.0 production migration acceptance (2026-10-23)
+
+The parent accepted the published **unsigned** Windows x64 installer
+`anubis-5.7.0-win-x64-installer.exe`, SHA256
+`95D99BA325D06150D498107C8167B3EBDFC112E4C3420B16B8F2D7E983C7A026`,
+125371870 bytes, from immutable tag `v5.7.0` at commit
+`2aecdb8aefcee1ae57f84aa0b04670555bcb3bd4`. Release run
+[39937031578](https://github.com/Anubis-Locker/anubis/actions/runs/39937031578)
+passed all platform jobs and published the release and own HTTPS mirrors.
+All eight package assets matched the GitHub content digests and `SHA256SUMS`;
+the installed EXE was downloaded from the verified own HTTPS mirror. No
+experimental QA installer was substituted.
+
+Actual migration of the existing per-user 5.6.12 installation used `/S
+/MIGRATEPERUSER /ALLOWUSERSIDS=<exact interactive Root SID>` and returned zero.
+The resulting protected package is under native Program Files; `AnubisHost`
+is Running, Automatic, LocalSystem. The version-1 migration report is complete,
+the old HKCU install/uninstall registrations are removed, the existing desktop
+shortcut targets the protected executable with no arguments, and all nine
+known protocol/file-class commands use its quoted path. The legacy payload
+and all six original profile files were byte-identical before the Root worker
+was started; the separate protected rollback snapshot remains intact.
+
+The installed source-built native helper is exactly
+`00057E89C33F55B4B28608D100CEEC0E963D8EA736B29D4F31A29C3EB400E9CE`,
+with release compiler Go 1.27.3; the packaged app is 5.7.0 and managed SDK is
+1.0.2. Seventeen installed runtime/UI/preload/parser files matched the tag's
+exact Windows Git checkout bytes. Five differed from the local QA working
+tree's raw bytes only because that tree mixed LF and CRLF: this is not a claim
+of raw-byte equality between those QA and CI files.
+
+A fresh, independent SYSTEM identity was matched against the gateway and
+approved separately; the legacy user's identity and approval were retained.
+The actual desktop shortcut was launched without QA/debug/development flags.
+Native Windows accessibility inspection and selection confirmed SYSTEM
+SID `S-1-5-18`/session 0 and the real Root SID/session 2, followed by a switch
+back to SYSTEM. Authenticated native PTY commands independently confirmed both
+tokens. The real Root backend's six original collections matched a private,
+read-only rollback copy using an ephemeral HMAC comparison, including three
+DPAPI-encrypted bookmarks, 13 quick commands and two themes; its configuration
+`password` field also matched. The comparison emitted only counts and match
+booleans; decrypted contents and the ephemeral comparison key were not persisted,
+and the temporary private reader copy was removed.
+
+After normal GUI close, the same HTTPS MCP session executed a SYSTEM PTY
+command after **36.902 seconds** with no GUI window present, exceeding the
+15-second heartbeat interval. The device stayed approved/online, and the SCM
+process and SYSTEM engine/context were unchanged. Reopening the same desktop
+shortcut reconnected to SYSTEM. Evidence includes
+`production-machine-570-installed-validation.json`,
+`production-persistence-570-reopen-accepted.json` and
+`production-root-workspace-570-accepted.json`. Earlier reports retain strict
+local-working-tree byte-check and native accessibility/input-pipe harness
+failures; the installation was not repeated or automatically uninstalled to
+resolve those diagnostics.
+
+This production acceptance is limited to the existing elevated Root account
+and live Windows session. It does **not** establish signing, reboot/pre-logon
+or logoff persistence, other-account behavior, non-elevated UAC approval or
+cancellation, or successful remote SSH/VNC/RDP/SPICE connections. Stable
+production update/uninstall were not rerun on this retained installation.
+Separately, the isolated unsigned 5.7.0 QA artifact `A1DD3763...` passed retained
+re-provisioning, protected same-version update and normal uninstall with a
+deliberately incompatible inherited PowerShell module path; that is bounded
+QA evidence, not a second production migration.
