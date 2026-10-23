@@ -426,3 +426,15 @@ SSH/SFTP, binary FTP upload/download and Telnet against private localhost
 fixtures, without the installed service, registry or original profiles.
 The `protocol-tests` workflow gates these checks and the managed browser
 transport/authentication regressions on Linux, Windows and macOS.
+
+The first corrected renderer publication, `client-v5.7.1`, also exposed a package
+boundary defect: its client imports two pure browser-safe modules from
+`app/common`, but those modules were missing from the published file whitelist.
+That immutable package is not a complete standalone build input. The replacement
+`client-v5.7.2` packages both modules at their original relative paths through the
+shared `assemble-web-client.js` publication helper. The package regression builds
+an actual tarball, installs it into an isolated consumer, checks all client imports
+escaping the client directory, compares the shared bytes and imports both modules.
+Web consumers must copy the published `app/common` tree beside the client tree;
+they must not depend on a sibling app checkout or a manually vendored fallback.
+This packaging correction does not change the native helper or managed SDK.

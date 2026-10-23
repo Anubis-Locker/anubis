@@ -27,6 +27,8 @@
   },
   "files": [
     "client",
+    "app/common/parse-vv.mjs",
+    "app/common/vv-to-tab.mjs",
     "README.md",
     "LICENSE"
   ]
