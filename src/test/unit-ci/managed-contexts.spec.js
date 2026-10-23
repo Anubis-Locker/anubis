@@ -10,7 +10,7 @@ const WebSocket = require('ws')
 const { initManagedBrowser, HEADER } = require('../../app/server/managed-browser')
 const { createManagedContexts, nativeContextBridge, CONTEXT_HEADER, SESSION_HEADER, CONTEXT_ROUTE, CONTEXT_SCRIPT } = require('../../app/server/managed-contexts')
 
-async function fixture (t) {
+async function fixture (t, { nativeBridge = false } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'anubis-context-routing-'))
   t.after(() => fs.rmSync(root, { recursive: true, force: true }))
   fs.mkdirSync(path.join(root, 'js'))
@@ -34,6 +34,7 @@ async function fixture (t) {
       state.calls.push(request)
       if (state.unsupported) throw new Error('unsupported broker operation')
       if (request.operation === 'list-contexts') {
+        if (state.deferList) await state.deferList()
         return {
           machine: { contextId: system.contextId, identity: system.identity },
           sessions: state.authorized
@@ -45,15 +46,23 @@ async function fixture (t) {
           (!state.authorized || request.sessionId !== 2 || request.accountSid !== worker.identity.sid || request.logonSid !== state.logonSid)) {
         throw new Error('native token/policy changed')
       }
-      const descriptor = request.target === 'system' ? system : worker
+      const descriptor = structuredClone(request.target === 'system' ? system : worker)
       if (request.operation === 'resolve-context' && request.contextId !== descriptor.contextId) throw new Error('worker replaced')
+      if (request.operation === 'resolve-context' && state.deferResolve) await state.deferResolve()
       if (request.operation === 'resolve-context' && request.target === 'user' && state.deferUserResolve) {
         await state.deferUserResolve()
       }
       return structuredClone(descriptor)
     }
   }
-  const router = createManagedContexts({ secret, bridge, pollInterval: 20, log: { warn () {} } })
+  const router = createManagedContexts({
+    secret,
+    bridge: nativeBridge
+      ? nativeContextBridge('AnubisHost', 'trusted-test-helper.exe', (_helper, _service, request) => bridge.call(request))
+      : bridge,
+    pollInterval: 20,
+    log: { warn () {} }
+  })
   t.after(() => router.close())
   async function backend (target, transport, routeContexts) {
     const app = express()
@@ -271,7 +280,7 @@ test('an older in-flight validation cannot revoke a newer selection in the same 
   assert.ok((await response.text()).includes('"name":"SYSTEM"'))
 })
 
-test('native bridge bounds concurrent helper processes without skipping per-request validation', async () => {
+test('native bridge bounds distinct helper processes without coalescing mutations', async () => {
   const releases = []
   let active = 0
   let maximum = 0
@@ -285,7 +294,7 @@ test('native bridge bounds concurrent helper processes without skipping per-requ
     active--
     return request.operation
   })
-  const pending = Array.from({ length: 12 }, () => bridge.call({ operation: 'list-contexts' }))
+  const pending = Array.from({ length: 12 }, () => bridge.call({ operation: 'launch-context' }))
   assert.equal(active, 4)
   for (let batch = 0; batch < 3; batch++) {
     const release = releases.splice(0)
@@ -296,4 +305,180 @@ test('native bridge bounds concurrent helper processes without skipping per-requ
   assert.equal((await Promise.all(pending)).length, 12)
   assert.equal(maximum, 4)
   assert.equal(active, 0)
+})
+
+test('default managed page and app authentication do not wait for the optional Windows catalog', async t => {
+  const f = await fixture(t)
+  const binding = f.session()
+  let release
+  let started
+  const pending = new Promise(resolve => { started = resolve })
+  const held = new Promise(resolve => { release = resolve })
+  f.state.deferList = () => { started(); return held }
+  t.after(() => release())
+  const catalog = f.list(binding)
+  await pending
+  const response = await fetch(f.origin + '/', {
+    headers: f.headersFor(binding),
+    signal: AbortSignal.timeout(1000)
+  }).catch(error => {
+    release()
+    throw error
+  })
+  assert.equal(response.status, 200)
+  const html = await response.text()
+  assert.ok(html.includes(CONTEXT_SCRIPT))
+  const token = /tokenElecterm',"([a-f0-9]+)"/.exec(html)[1]
+  const constants = await fetch(f.origin + '/api/get-constants', {
+    headers: { ...f.headersFor(binding), token },
+    signal: AbortSignal.timeout(1000)
+  })
+  assert.equal(constants.status, 200)
+  assert.equal(f.state.calls.filter(call => call.operation === 'list-contexts').length, 1)
+  release()
+  await catalog
+  f.state.unsupported = true
+  const stillAvailable = await fetch(f.origin + '/', { headers: f.headersFor(binding) })
+  assert.equal(stillAvailable.status, 200)
+  assert.equal((await fetch(f.origin + '/', {
+    headers: { ...f.headersFor(binding), [HEADER]: 'wrong-proof' }
+  })).status, 403)
+})
+
+test('only queued read validations share a helper and every later request rechecks policy', async () => {
+  const calls = []
+  const releases = []
+  let denied = false
+  const bridge = nativeContextBridge('AnubisHost', 'trusted-test-helper.exe', async (_helper, _service, request) => {
+    calls.push(request)
+    await new Promise(resolve => releases.push(resolve))
+    if (denied) throw new Error('native policy revoked')
+    return { contextId: request.contextId }
+  })
+  const request = { operation: 'resolve-context', target: 'system', contextId: '1'.repeat(32) }
+  const burst = Array.from({ length: 300 }, () => bridge.call({ ...request }))
+  const settled = Promise.all(burst)
+  settled.catch(() => {})
+  const initialCalls = calls.length
+  for (const release of releases.splice(0)) release()
+  assert.equal(initialCalls, 4, 'already-started native checks cannot be shared')
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(calls.length, 5, 'all queued participants are admitted before the fifth native check starts')
+  for (const release of releases.splice(0)) release()
+  const results = await settled
+  assert.equal(results.length, 300)
+  assert.ok(results.every(result => result.contextId === request.contextId))
+  denied = true
+  const later = bridge.call(request)
+  const rejected = assert.rejects(later, /native policy revoked/)
+  assert.equal(calls.length, 6, 'settled results are never authorization caches')
+  for (const release of releases.splice(0)) release()
+  await rejected
+  denied = false
+  const recovery = bridge.call(request)
+  assert.equal(calls.length, 7, 'failed checks are not cached or retried automatically')
+  for (const release of releases.splice(0)) release()
+  await recovery
+})
+
+test('native validation coalescing never crosses identity or logon boundaries', async () => {
+  const releases = []
+  const calls = []
+  const bridge = nativeContextBridge('AnubisHost', 'trusted-test-helper.exe', async (_helper, _service, request) => {
+    calls.push(request)
+    await new Promise(resolve => releases.push(resolve))
+    return request
+  })
+  const request = {
+    operation: 'resolve-context',
+    target: 'user',
+    contextId: '2'.repeat(32),
+    sessionId: 2,
+    accountSid: 'S-1-5-21-1-2-3-1001',
+    logonSid: 'S-1-5-5-10-20'
+  }
+  const blockers = Array.from({ length: 4 }, () => bridge.call({ operation: 'launch-context' }))
+  const first = bridge.call(request)
+  const duplicate = bridge.call(Object.fromEntries(Object.entries(request).reverse()))
+  const different = bridge.call({ ...request, logonSid: 'S-1-5-5-10-21' })
+  assert.equal(calls.length, 4)
+  for (const release of releases.splice(0)) release()
+  await Promise.all(blockers)
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(calls.length, 6)
+  for (const release of releases.splice(0)) release()
+  const values = await Promise.all([first, duplicate, different])
+  assert.equal(values[0], values[1])
+  assert.notEqual(values[0].logonSid, values[2].logonSid)
+})
+
+test('post-change requests never join an older held native authorization result', async t => {
+  for (const [name, change] of [
+    ['policy removal', f => { f.state.authorized = false }],
+    ['Windows logon replacement', f => { f.state.logonSid = 'S-1-5-5-10-21' }],
+    ['runtime replacement', f => { f.worker.contextId = '3'.repeat(32) }]
+  ]) {
+    await t.test(name, async t => {
+      const f = await fixture(t, { nativeBridge: true })
+      const selected = await f.select(f.session(), 'user')
+      const token = await f.login(selected)
+      let release
+      let started
+      const pending = new Promise(resolve => { started = resolve })
+      const held = new Promise(resolve => { release = resolve })
+      f.state.deferUserResolve = () => { started(); return held }
+      const options = { headers: { ...selected.headers, token }, signal: AbortSignal.timeout(2000) }
+      const older = fetch(f.origin + '/api/get-constants', options)
+      await pending
+      change(f)
+      let newer
+      try {
+        newer = await fetch(f.origin + '/api/get-constants', options)
+      } finally {
+        release()
+      }
+      assert.equal(newer.status, 503)
+      assert.equal((await older).status, 503)
+      assert.equal((await fetch(f.origin + '/api/get-constants', options)).status, 403)
+    })
+  }
+})
+
+test('concurrent selected-profile assets do not exhaust helpers and invalidate an authenticated context', async t => {
+  const f = await fixture(t, { nativeBridge: true })
+  const selected = await f.select(f.session(), 'user')
+  const token = await f.login(selected)
+  const before = f.state.calls.filter(call => call.operation === 'resolve-context').length
+  const releases = []
+  f.state.deferResolve = () => new Promise(resolve => releases.push(resolve))
+  const requests = Array.from({ length: 150 }, () => fetch(f.origin + '/js/basic-test.js', {
+    headers: selected.headers,
+    signal: AbortSignal.timeout(5000)
+  }).then(async response => ({ status: response.status, body: await response.text() }))
+    .catch(error => ({ error: error.cause?.code || error.name })))
+  const all = Promise.all(requests)
+  const drain = setInterval(() => {
+    for (const release of releases.splice(0)) release()
+  }, 100)
+  let responses
+  try {
+    responses = await all
+  } finally {
+    clearInterval(drain)
+    f.state.deferResolve = null
+    for (const release of releases.splice(0)) release()
+  }
+  const constants = await fetch(f.origin + '/api/get-constants', {
+    headers: { ...selected.headers, token }
+  })
+  assert.equal(constants.status, 200, 'local helper overload must not destroy the existing authenticated context')
+  assert.equal((await constants.json()).config.workspace, 'Root')
+  assert.ok(responses.every(response => response.status === 200 && response.body.includes('privateWorkspaceAsset')),
+    'asset requests retain the selected authenticated workspace instead of destroying its grant on local queue overflow')
+  const resolves = f.state.calls.filter(call => call.operation === 'resolve-context').length - before
+  assert.ok(resolves < requests.length, `overlapping asset validations used ${resolves} helpers for ${requests.length} assets`)
+  f.state.authorized = false
+  assert.equal((await fetch(f.origin + '/api/get-constants', {
+    headers: { ...selected.headers, token }
+  })).status, 503, 'a later policy removal still invalidates the selection')
 })

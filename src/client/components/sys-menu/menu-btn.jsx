@@ -6,7 +6,7 @@ import { PureComponent } from 'react'
 import {
   Popover
 } from 'antd'
-import { ShieldCheckOutlined } from '../icons/ui-icons'
+import { logoPath1 } from '../../common/constants'
 import { shortcutDescExtend } from '../shortcuts/shortcut-handler.js'
 import MenuRender from './sys-menu.jsx'
 import { refsStatic } from '../common/ref.js'
@@ -236,7 +236,7 @@ class MenuBtn extends PureComponent {
             className='menu-logo'
             aria-hidden='true'
           >
-            <ShieldCheckOutlined />
+            <img src={logoPath1} width={24} height={24} alt='' />
           </span>
           <span className='sidebar-brand-name'>{window.et.brand.name}</span>
         </button>

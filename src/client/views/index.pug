@@ -28,10 +28,8 @@ html
         background-size: min(100%, 766px) auto;
       }
       .morph-shape {
-        background: linear-gradient(45deg, #22D3EE 0%, #34D399 100%);
-        animation: morph 8s ease-in-out infinite;
-        border-radius: 60% 40% 30% 70% / 60% 30% 70% 40%;
-        transition: all 1s ease-in-out;
+        background: #111;
+        border-radius: 8px;
         z-index: 5;
       }
 
@@ -75,4 +73,3 @@ html
       - var url = src='/js/basic-' + version + '.js'
       script(src=url1, type='module')
       script(src=url, type='module')
-

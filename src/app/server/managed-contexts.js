@@ -19,9 +19,12 @@ function nativeContextBridge (serviceName, helper = path.join(path.dirname(proce
   if (!/^AnubisHost(?:-QA-[A-Za-z0-9-]{1,40})?$/.test(serviceName)) throw new Error('Invalid machine service')
   let active = 0
   const pending = []
+  const reads = new Map()
   const drain = () => {
     if (active >= 4 || !pending.length) return
-    const { request, resolve, reject } = pending.shift()
+    const { request, resolve, reject, key } = pending.shift()
+    // Only callers admitted before this native check starts may share it.
+    if (key) reads.delete(key)
     active++
     callHost(helper, serviceName, { version: 1, ...request }).then(resolve, reject).finally(() => {
       active--
@@ -29,11 +32,21 @@ function nativeContextBridge (serviceName, helper = path.join(path.dirname(proce
     })
   }
   return {
-    call: request => new Promise((resolve, reject) => {
-      if (pending.length >= 128) return reject(new Error('Managed context request queue exceeded'))
-      pending.push({ request, resolve, reject })
+    call (request) {
+      const key = ['list-contexts', 'resolve-context'].includes(request.operation)
+        ? JSON.stringify(Object.keys(request).sort().map(name => [name, request[name]]))
+        : null
+      if (key && reads.has(key)) return reads.get(key)
+      if (pending.length >= 128) return Promise.reject(new Error('Managed context request queue exceeded'))
+      let entry
+      const operation = new Promise((resolve, reject) => {
+        entry = { request, resolve, reject, key }
+      })
+      if (key) reads.set(key, operation)
+      pending.push(entry)
       drain()
-    })
+      return operation
+    }
   }
 }
 
@@ -284,7 +297,6 @@ function createManagedContexts ({
           return res.json({ selector: grant.selector, context: publicContext(descriptor) })
         }
         if (!selected) {
-          await catalog(record)
           req.managedContextUi = true
           return next()
         }
