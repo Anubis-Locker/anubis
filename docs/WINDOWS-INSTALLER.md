@@ -363,6 +363,15 @@ exact Windows Git checkout bytes. Five differed from the local QA working
 tree's raw bytes only because that tree mixed LF and CRLF: this is not a claim
 of raw-byte equality between those QA and CI files.
 
+A separately authenticated HTTPS gateway browser session also completed all
+14 existing renderer-navigation checks: information tabs, the main settings
+sections, widgets and settings categories, with no uncaught JavaScript errors
+or failed own-origin HTTP requests. The installed browser-assets module is
+independently pinned at **5.6.11**; its asset/display version is not the 5.7.0
+machine application version. Validation matched that declared module version
+rather than assuming every separately packaged component shares a version.
+The evidence is `production-renderer-navigation-570-accepted.json`.
+
 A fresh, independent SYSTEM identity was matched against the gateway and
 approved separately; the legacy user's identity and approval were retained.
 The actual desktop shortcut was launched without QA/debug/development flags.
