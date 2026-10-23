@@ -44,6 +44,30 @@ download the matching asset, install it, and report install/error events to
 `api.anubis.locker/api/report` (see `ANUBIS_UPDATE_URL` / `ANUBIS_API_URL` env vars to override).
 Or just grab a binary directly from the [releases page](https://download.anubis.locker).
 
+### Web distribution
+
+The runnable Web package is published only to our registry (Node 24 or newer):
+
+```powershell
+npm install -g anubis-web@5.6.12 --legacy-peer-deps --registry=https://npm.anubis.locker/
+anubis-web
+```
+
+The CLI creates strong, independent Web credentials in its private configuration
+directory and defaults to managed enrollment at `https://api.anubis.locker`.
+Use `ANUBIS_WEB_HOME` to choose that writable directory, `--init` to prepare it
+without starting the server, or `--standalone` to opt out of enrollment.
+Existing configuration is preserved. Approving the device does not replace its
+Web password/JWT login. Source installers are available as
+`https://download.anubis.locker/scripts/one-line-web.bat` and
+`https://download.anubis.locker/scripts/one-line-web.sh`; full source and usage
+instructions are in [anubis-web](https://github.com/Anubis-Locker/anubis-web).
+The published Web package has also completed controlled production HTTPS
+acceptance: fingerprint approval, independent Web login, terminal execution,
+MCP renderer tools and revocation of active SSE/WebSocket streams. Its test-only
+fixture is `test/packaged/managed-live.js` in the Web repository; production
+mutations require explicit opt-in and are limited to its verified fresh identity.
+
 ## Data folder and migration
 
 User data lives in the `anubis` folder under the OS app data directory
@@ -186,6 +210,12 @@ the user's exit-confirmation setting. The check required no manual application
 closure, process kills or Retry clicks; the harness operated only the normal
 Next/Install/Finish installer controls. This used a loopback feed and a separately
 named QA installation, not the public release feed or unattended installation.
+A subsequent isolated check completed the same 5.6.10-to-5.6.11 upgrade through
+the public release feed, verifying the downloaded installer hash, successful NSIS
+exit and preservation of the encrypted password.
+The 5.6.11-to-5.6.12 public-feed upgrade also completed with the exact accepted
+installer hash, NSIS exit code zero, normal old-client shutdown and a readable
+preserved encrypted bookmark.
 Windows release workflows run the packaged smoke test before uploading artifacts
 and use the checked-in dependency lock rather than replacing native-module
 versions during the build.
@@ -198,10 +228,15 @@ executable and run `node --test src/test/packaged/unix-smoke.js`.
 
 ## Build status
 
+The published stable desktop release is
+[5.6.12](https://github.com/Anubis-Locker/anubis/releases/tag/v5.6.12).
+All eight exact accepted CI binaries and their SHA256 manifest are mirrored to
+our download host; both stable update feeds advertise the same release.
+
 | Platform | Status |
 |---|---|
-| Linux (deb/AppImage/tar.gz) | CI artifacts built. Packaged tar.gz passed terminal execution, settings, bookmark persistence and OS-keyring encryption in an isolated Ubuntu desktop session; deb/AppImage installation and publication pending |
-| Windows (NSIS) | Runtime repairs installed and checked: terminal, files, SSH/SFTP, MCP, AI, VNC/RDP display and input, encrypted hosted sync, reverse SSH tunnel and first-run migration. Isolated interactive NSIS replacement from QA 5.6.10 to 5.6.11 preserved bookmarks and passwords; public-feed rollout pending |
+| Linux (deb/AppImage/tar.gz) | 5.6.12 published. Exact CI tar.gz passed terminal execution, settings, native serial PTY input/output, bookmark persistence and OS-keyring encryption in an isolated Ubuntu desktop session; deb/AppImage installation was not exercised |
+| Windows (NSIS) | 5.6.12 published and installed through the public updater with preserved encrypted data. Exact CI application passed actual production HTTPS approval, browser/native-store sharing, terminal, VNC pixels/input, independent password login, native MCP and active WebSocket/SSE revocation |
 | macOS (dmg) | x64 and arm64 packaged applications passed native terminal execution, local files, settings, OS-keychain encryption and bookmark/password persistence after restart (5 checks per architecture). DMGs remain unsigned and not notarized; Gatekeeper installation acceptance is not established |
 
 The hosted AI placeholder source is `services\ai-stub.js`; run it with
@@ -264,7 +299,11 @@ approved online device. Configure external MCP clients with
 `Authorization: Bearer <temporary token>`. The grant lasts at most one hour and
 permits only GET/POST/DELETE on that exact endpoint, not the browser UI, controller
 API or WebSockets. The local authenticated MCP widget must actually be running.
-Its local token is inserted on the device, never returned to the controller.
+The adapter inserts its local token on the device; controller enrollment and
+issued MCP grants do not contain that token. Ordinary authorized Web widget
+configuration follows its existing permissions and trusted-proxy model.
+For Web renderer tools, start the widget from the authenticated browser session
+that will serve those tools and keep that session connected.
 Expiration closes active HTTP/SSE streams; device revocation cancels all grants.
 Desktop MCP is a separate administrative capability acting on the native store,
 not a means of unlocking browser data or bypassing OS-backed encryption.
