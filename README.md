@@ -307,6 +307,9 @@ instead of acknowledging a report that was not saved.
 
 The administrator inventory is available at
 `https://api.anubis.locker/admin` (or `/admin` on your management API host).
+For practical Desktop SSH/RDP/VNC and managed Web connection steps, see the
+[remote access guide](docs/REMOTE-ACCESS.md). It distinguishes remote profile
+access from Windows screen sharing and documents native-client limitations.
 Deploy `services\management-dashboard.html`, `services\package.json` and its lock
 alongside `management-api.js` (renamed `server.js` on the hosted service).
 Sign in using the server's management administrator token, not a desktop MCP
