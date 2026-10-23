@@ -137,8 +137,12 @@ async function fixture (t, options = {}) {
     './machine-host-entry': { cleanRuntimeEnvironment () {} },
     './machine-client-intent': require('../../app/lib/machine-client-intent'),
     './embedded-website': require('../../app/lib/embedded-website'),
-    './machine-client-protocols': require('../../app/lib/machine-client-protocols'),
-    './safe-storage': { safeDecrypt: value => options.decrypt ? options.decrypt(value) : value },
+    './machine-client-protocols': {
+      readDeepLinkAutoRegister (...args) {
+        assert.equal(args[2], 'C:\\Windows\\System32')
+        return require('../../app/lib/machine-client-protocols').readDeepLinkAutoRegister(...args)
+      }
+    },
     './deep-link': {
       registerDeepLink (...args) {
         assert.equal(ready, true)
@@ -235,22 +239,11 @@ test('interactive primary startup registers protocols by default after ready wit
   }
 })
 
-test('interactive caller opt-out is honored before any workspace selection, including encrypted configuration', async t => {
-  for (const options of [
-    { protocolConfig: { deepLinkAutoRegister: false } },
-    {
-      protocolStored: 'enc:fixture-encrypted',
-      decrypt: value => {
-        assert.equal(value, 'fixture-encrypted')
-        return JSON.stringify({ deepLinkAutoRegister: false })
-      }
-    }
-  ]) {
-    const f = await fixture(t, options)
-    assert.deepEqual(f.protocolCalls, [])
-    assert.deepEqual(f.protocolErrors, [])
-    assert.equal(f.requests.length, 0)
-  }
+test('interactive caller opt-out is honored before any workspace selection', async t => {
+  const f = await fixture(t, { protocolConfig: { deepLinkAutoRegister: false } })
+  assert.deepEqual(f.protocolCalls, [])
+  assert.deepEqual(f.protocolErrors, [])
+  assert.equal(f.requests.length, 0)
 })
 
 test('unreadable protocol preference does not re-enable registration and failures are sanitized without breaking the GUI', async t => {

@@ -4,6 +4,8 @@ const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 const vm = require('node:vm')
+const crypto = require('node:crypto')
+const { createRequire } = require('node:module')
 const { DatabaseSync } = require('node:sqlite')
 const { readDeepLinkAutoRegister } = require('../../app/lib/machine-client-protocols')
 const { createBrowserRpc } = require('../../app/lib/managed-browser-rpc')
@@ -26,7 +28,7 @@ function profile (t, rows = []) {
     file,
     dir,
     seed,
-    read: decrypt => readDeepLinkAutoRegister(root, brand.data.dirName, decrypt)
+    read: () => readDeepLinkAutoRegister(root, brand.data.dirName, 'C:\\Windows\\System32')
   }
 }
 
@@ -39,16 +41,12 @@ test('fresh profile defaults on without creating a profile or database; missing 
   assert.deepEqual(fs.readdirSync(f.dir), ['electerm_data.db'])
 })
 
-test('plaintext and existing encrypted opt-outs are read without database mutation or writable workspace initialization', t => {
-  for (const encrypted of [false, true]) {
-    const stored = encrypted ? 'enc:fixture-ciphertext' : JSON.stringify({ deepLinkAutoRegister: false })
+test('plaintext opt-outs are read without database mutation or writable workspace initialization', t => {
+  for (const stored of [JSON.stringify({ deepLinkAutoRegister: false }), 'enc:' + JSON.stringify({ deepLinkAutoRegister: false })]) {
     const f = profile(t, [['userConfig', stored]])
     f.seed()
     const bytes = fs.readFileSync(f.file)
-    assert.equal(f.read(value => {
-      assert.equal(value, 'fixture-ciphertext')
-      return JSON.stringify({ deepLinkAutoRegister: false })
-    }), false)
+    assert.equal(f.read(), false)
     assert.deepEqual(fs.readFileSync(f.file), bytes)
     assert.deepEqual(fs.readdirSync(f.dir), ['electerm_data.db'])
     fs.renameSync(f.file, f.file + '.closed')
@@ -72,7 +70,7 @@ test('invalid config, decryption failure and invalid database fail closed and re
     const f = profile(t, [['userConfig', stored]])
     f.seed()
     const bytes = fs.readFileSync(f.file)
-    assert.throws(() => f.read(() => { throw new Error('Cannot decrypt') }))
+    assert.throws(() => f.read())
     assert.deepEqual(fs.readFileSync(f.file), bytes)
     fs.renameSync(f.file, f.file + '.closed')
   }
@@ -81,6 +79,90 @@ test('invalid config, decryption failure and invalid database fail closed and re
   fs.writeFileSync(f.file, 'Not a SQLite database')
   assert.throws(() => f.read())
   assert.equal(fs.readFileSync(f.file, 'utf8'), 'Not a SQLite database')
+})
+
+function encryptedProfile (t, options = {}) {
+  const key = crypto.randomBytes(32)
+  const nonce = crypto.randomBytes(12)
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, nonce)
+  const body = Buffer.concat([cipher.update(JSON.stringify({ deepLinkAutoRegister: false })), cipher.final()])
+  let bytes = Buffer.concat([Buffer.from(options.version || 'v10'), nonce, body, cipher.getAuthTag()])
+  if (options.short) bytes = bytes.subarray(0, 30)
+  if (options.tamper) bytes[bytes.length - 1] ^= 1
+  const wrapped = Buffer.concat([Buffer.from(options.prefix || 'DPAPI'), Buffer.from('wrapped-fixture-key')])
+  const f = profile(t, [['userConfig', 'enc:v2:safe:' + bytes.toString('base64')]])
+  f.seed()
+  fs.writeFileSync(path.join(f.root, brand.data.dirName, 'Local State'),
+    JSON.stringify({ os_crypt: { encrypted_key: wrapped.toString('base64') } }))
+  const filename = path.resolve(__dirname, '../../app/lib/machine-client-protocols.js')
+  const localRequire = createRequire(filename)
+  const output = { exports: {} }
+  const returned = []
+  const commands = []
+  vm.runInNewContext('(function(require,module){\n' + fs.readFileSync(filename, 'utf8') + '\n})', { Buffer })(
+    name => name === 'node:child_process'
+      ? {
+          execFileSync (file, args, config) {
+            commands.push({ file, args, config })
+            assert.equal(file, 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe')
+            assert.ok(args.includes('-NoProfile') && args.includes('-NonInteractive'))
+            assert.equal(config.input, wrapped.subarray(5).toString('base64'))
+            assert.equal(config.timeout, 10000)
+            assert.equal(config.maxBuffer, 4096)
+            assert.equal(config.windowsHide, true)
+            assert.equal(config.env, undefined)
+            assert.deepEqual(Array.from(config.stdio), ['pipe', 'pipe', 'pipe'])
+            assert.equal(args.join(' ').includes(config.input), false)
+            const value = Buffer.from(options.badSize ? Buffer.alloc(31).toString('base64') : key.toString('base64'))
+            if (options.badOutput) value[0] |= 128
+            returned.push(value)
+            if (options.failure) throw Object.assign(new Error('Private native error'), { stdout: value, stderr: Buffer.from('private') })
+            return value
+          }
+        }
+      : localRequire(name), output)
+  return {
+    ...f,
+    commands,
+    returned,
+    read: () => output.exports.readDeepLinkAutoRegister(f.root, brand.data.dirName, 'C:\\Windows\\System32')
+  }
+}
+
+test('same-user DPAPI key uses only bounded private pipes; authenticated decryption wipes transient output', t => {
+  const f = encryptedProfile(t)
+  const before = fs.readFileSync(f.file)
+  assert.equal(f.read(), false)
+  assert.equal(f.commands.length, 1)
+  assert.ok(f.returned.every(value => value.every(byte => byte === 0)))
+  assert.deepEqual(fs.readFileSync(f.file), before)
+})
+
+test('tampered framing, wrong DPAPI prefix, invalid key size and native failure never enable registration', t => {
+  for (const options of [
+    { tamper: true }, { prefix: 'OTHER' }, { version: 'v11' },
+    { short: true }, { badSize: true }, { badOutput: true }, { failure: true }
+  ]) {
+    const f = encryptedProfile(t, options)
+    assert.throws(() => f.read())
+    assert.ok(f.returned.every(value => value.every(byte => byte === 0)))
+    if (options.prefix || options.version || options.short) assert.equal(f.commands.length, 0)
+  }
+})
+
+test('oversized config and Local State inputs fail closed before native unprotection', t => {
+  for (const stored of [
+    'x'.repeat(4 * 1024 * 1024 + 1),
+    JSON.stringify({ deepLinkAutoRegister: false, padding: '\u00e9'.repeat(2 * 1024 * 1024) })
+  ]) {
+    const f = profile(t, [['userConfig', stored]])
+    f.seed()
+    assert.throws(() => f.read(), /Invalid protocol/)
+  }
+  const encrypted = encryptedProfile(t)
+  fs.writeFileSync(path.join(encrypted.root, brand.data.dirName, 'Local State'), 'x'.repeat(4 * 1024 * 1024 + 1))
+  assert.throws(() => encrypted.read(), /Invalid protocol/)
+  assert.equal(encrypted.commands.length, 0)
 })
 
 function protocols (packaged = true) {

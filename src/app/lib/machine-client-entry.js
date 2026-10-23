@@ -58,7 +58,7 @@ async function startMachineClient () {
   await app.whenReady()
   try {
     const { readDeepLinkAutoRegister } = require('./machine-client-protocols')
-    if (readDeepLinkAutoRegister(app.getPath('appData'), brand.data.dirName, require('./safe-storage').safeDecrypt)) {
+    if (readDeepLinkAutoRegister(app.getPath('appData'), brand.data.dirName, actor.systemDirectory)) {
       require('./deep-link').registerDeepLink()
     }
   } catch (error) {
