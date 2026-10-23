@@ -77,6 +77,10 @@ jobs:
     permissions:
       contents: write
     steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 24.x
     - uses: actions/download-artifact@v4
       with:
         path: out
@@ -86,17 +90,18 @@ jobs:
         GH_TOKEN: ${{ github.token }}
         TAG: ${{ github.ref_name }}
       run: |
-        ls -l out
+        node services/prepare-release.js out release-assets "${TAG#v}"
         pre=""
         case "$TAG" in *-*) pre="--prerelease" ;; esac
         if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-          gh release upload "$TAG" out/* --repo "$GITHUB_REPOSITORY" --clobber
+          echo "::error::Release $TAG already exists; do not replace published binaries"; exit 1
         else
-          gh release create "$TAG" out/* --repo "$GITHUB_REPOSITORY" \
+          gh release create "$TAG" release-assets/* --repo "$GITHUB_REPOSITORY" \
             --title "$TAG" --generate-notes $pre
         fi
 
   publish-self-hosted:
+    if: ${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-') }}
     needs: release
     permissions:
       contents: read

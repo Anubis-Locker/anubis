@@ -6,6 +6,8 @@ const { join, resolve } = require('node:path')
 const { _electron: electron } = require('playwright')
 const { checkRendererNavigation } = require('./lib/renderer-navigation')
 const { checkUIDataFlows, checkUIDataPersistence } = require('./lib/ui-data-flows')
+const { startTestSerialServer } = require('../integration/lib/serial-test-server')
+const { checkSerialSession } = require('./lib/serial-session')
 
 test('packaged Unix desktop functionality', {
   skip: process.platform === 'win32',
@@ -27,6 +29,7 @@ test('packaged Unix desktop functionality', {
   const errors = []
   let app
   let page
+  let serial
   let completed = false
   async function closeApp () {
     const current = app
@@ -87,6 +90,7 @@ test('packaged Unix desktop functionality', {
       }
       if (app) await closeApp()
     } finally {
+      if (serial) await serial.close()
       rmSync(root, { recursive: true, force: true })
     }
   })
@@ -102,6 +106,10 @@ test('packaged Unix desktop functionality', {
   })
   await checkRendererNavigation(page, t)
   await checkUIDataFlows(page, t)
+  await t.test('native serial I/O and line endings work through a real PTY', async () => {
+    serial = await startTestSerialServer({ rootDir: root })
+    await checkSerialSession(page, serial)
+  })
   await t.test('file manager lists a real local file', async () => {
     await page.locator('.session-current .term-sftp-tabs .type-tab').nth(1).click()
     const address = page.locator('.session-current .sftp-local-section .sftp-title input').first()
