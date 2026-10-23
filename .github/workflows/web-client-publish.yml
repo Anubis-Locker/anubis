@@ -37,10 +37,14 @@ jobs:
         CLIENT_PKG_NAME: ${{ vars.CLIENT_PKG_NAME || '@ai-security-tool/electerm-react' }}
       run: |
         node --test src/test/unit-ci/web-client-package.spec.js src/test/unit-ci/web-client-consumer.spec.js
-        node src/build/bin/assemble-web-client.js
+        # Preserve the Windows publisher's archive line endings on every runner.
+        source="$(mktemp -d)"
+        git -c core.autocrlf=true archive HEAD | tar -x -C "$source"
+        export CLIENT_ASSEMBLED_ROOT="$source/src/build/web-app"
+        node "$source/src/build/bin/assemble-web-client.js"
         state="$(node --input-type=module - <<'NODE'
         import fs from 'node:fs'
-        const pkg = JSON.parse(fs.readFileSync('src/build/web-app/package.json', 'utf8'))
+        const pkg = JSON.parse(fs.readFileSync(process.env.CLIENT_ASSEMBLED_ROOT + '/package.json', 'utf8'))
         const registry = process.env.NPM_REGISTRY_URL.replace(/\/?$/, '/')
         const response = await fetch(new URL(pkg.name + '/' + pkg.version, registry), {
           redirect: 'error', signal: AbortSignal.timeout(20000)
@@ -50,13 +54,13 @@ jobs:
         NODE
         )"
         if [ "$state" = published ]; then
-          version="$(node -p "require('./src/build/web-app/package.json').version")"
+          version="$(node -p "require(process.env.CLIENT_ASSEMBLED_ROOT + '/package.json').version")"
           consumer="$(mktemp -d)"
           npm install --prefix "$consumer" "$CLIENT_PKG_NAME@$version" --ignore-scripts \
             --registry "$NPM_REGISTRY_URL" --no-audit --no-fund --loglevel=error
-          node src/build/bin/verify-web-client-consumer.js src/build/web-app "$consumer/node_modules/$CLIENT_PKG_NAME"
+          node src/build/bin/verify-web-client-consumer.js "$CLIENT_ASSEMBLED_ROOT" "$consumer/node_modules/$CLIENT_PKG_NAME"
         else
-          cd src/build/web-app
+          cd "$CLIENT_ASSEMBLED_ROOT"
           trap 'rm -f .npmrc' EXIT
           host="${NPM_REGISTRY_URL#https://}"
           printf '%s\n' "//${host%/}/:_authToken=${NPM_TOKEN}" > .npmrc
