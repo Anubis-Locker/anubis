@@ -16,13 +16,23 @@ They must not register another central machine agent.
 
 Windows amd64, Go 1.26 or newer:
 
+Windows release workflows pin Go 1.27.3, matching the compiler used for the
+accepted native helper. The `go.mod` version is a source-compatibility minimum,
+not the release compiler selection. Packaged builds use `CGO_ENABLED=0`,
+`GOAMD64=v1`, `-trimpath`, and `-buildvcs=false`. Verify each artifact's hash and
+embedded build information; equivalent source alone does not establish binary
+identity. Git attributes preserve LF native source/module inputs on Windows
+checkouts as well as Linux checkouts.
+
 Put an existing Node runtime on PATH to include the real Node/libuv pipe
 integration test; that one test explicitly skips if Node is unavailable.
 
 ```powershell
 go test -count=1 ./...
 go vet ./...
-go build -trimpath -o out\anubis-host.exe .
+$env:CGO_ENABLED = '0'
+$env:GOAMD64 = 'v1'
+go build -trimpath -buildvcs=false -o out\anubis-host.exe .
 .\out\anubis-host.exe identity
 ```
 

@@ -63,6 +63,10 @@ The 32-bit NSIS bootstrap invokes native x64 PowerShell through Windows'
 `Sysnative` alias; deployment rejects a 32-bit PowerShell process. Silent fatal
 dialogs have a default response so failures return nonzero without waiting for
 an invisible confirmation.
+Before resolving installer cmdlets, deployment restricts `PSModulePath` to that
+process's trusted `$PSHOME\Modules` and explicitly imports its built-in security
+manifest. Inherited PowerShell 7 or user module paths cannot select incompatible
+or substituted ACL cmdlets, including when setup is launched from `pwsh`.
 
 Updates first validate the old protected package and exact service image/account,
 then use the native stop command and poll SCM Stopped (up to 60 seconds).

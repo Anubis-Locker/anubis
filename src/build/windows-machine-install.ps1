@@ -8,6 +8,10 @@ param(
   [switch] $DefinitionsOnly
 )
 
+# Inherited pwsh/user module paths must not select installer cmdlets.
+$env:PSModulePath = [IO.Path]::Combine($PSHOME, 'Modules')
+Import-Module ([IO.Path]::Combine($PSHOME, 'Modules', 'Microsoft.PowerShell.Security', 'Microsoft.PowerShell.Security.psd1')) -ErrorAction Stop
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 if ($args.Count -ne 0) { throw 'Unexpected installer arguments; service and package names are compiled, not runtime options' }

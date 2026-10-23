@@ -145,3 +145,57 @@ Write-Output 'Deployment safety/lifecycle assertions passed without SCM mutation
   assert.equal(result.status, 0, result.stdout + result.stderr)
   assert.match(result.stdout, /assertions passed without SCM mutations/)
 })
+
+it('resolves real PS5 ACL cmdlets only from its own modules despite inherited cross-edition paths', {
+  skip: process.platform !== 'win32'
+}, () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'anubis-module-path-'))
+  try {
+    const moduleDir = path.join(dir, 'Microsoft.PowerShell.Security')
+    fs.mkdirSync(moduleDir)
+    fs.writeFileSync(path.join(moduleDir, 'Microsoft.PowerShell.Security.psd1'), `@{
+RootModule='Microsoft.PowerShell.Security.dll'
+ModuleVersion='7.0.0'
+GUID='c5ee2687-93ac-4d77-8a42-f709380492b2'
+PowerShellVersion='3.0'
+CmdletsToExport=@('Get-Acl','Set-Acl')
+FunctionsToExport=@()
+}`)
+    fs.writeFileSync(path.join(moduleDir, 'Microsoft.PowerShell.Security.dll'), 'INCOMPATIBLE CLR ASSEMBLY FIXTURE, NEVER EXECUTABLE')
+    const quote = value => value.replaceAll("'", "''")
+    const prefix = `
+$ErrorActionPreference='Stop'
+$env:PSModulePath='${quote(dir)}'
+`
+    const run = body => spawnSync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', prefix + body], {
+      encoding: 'utf8', timeout: 30000
+    })
+    const result = run(`
+. '${quote(script)}' -DefinitionsOnly
+if ($env:PSModulePath -ine [IO.Path]::Combine($PSHOME,'Modules')) { throw 'Untrusted module search path retained' }
+$file='${quote(path.join(dir, 'acl-fixture.txt'))}'
+[IO.File]::WriteAllText($file,'disposable ACL fixture')
+$acl=Get-Acl -LiteralPath $file
+$sid=[Security.Principal.WindowsIdentity]::GetCurrent().User
+$acl.SetAccessRuleProtection($true,$false)
+$acl.SetAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($sid,[Security.AccessControl.FileSystemRights]::FullControl,[Security.AccessControl.AccessControlType]::Allow)))
+Set-Acl -LiteralPath $file -AclObject $acl
+$actual=Get-Acl -LiteralPath $file
+$rules=@($actual.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]))
+if (-not $actual.AreAccessRulesProtected -or $rules.Count -ne 1 -or
+    $rules[0].IdentityReference.Value -cne $sid.Value -or $rules[0].IsInherited -or
+    $rules[0].AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow -or
+    $rules[0].FileSystemRights -ne [Security.AccessControl.FileSystemRights]::FullControl) {
+  throw 'Real ACL round-trip did not preserve the exact protected grant'
+}
+$module=(Get-Command Get-Acl).Module
+if (-not $module.Path.StartsWith($PSHOME+'\\',[StringComparison]::OrdinalIgnoreCase)) { throw 'ACL module did not come from PSHOME' }
+Write-Output 'TRUSTED_PS5_ACL_MODULE_WITH_CONTAMINATED_INHERITANCE_OK'
+`)
+    assert.ifError(result.error)
+    assert.equal(result.status, 0, result.stdout + result.stderr)
+    assert.match(result.stdout, /TRUSTED_PS5_ACL_MODULE_WITH_CONTAMINATED_INHERITANCE_OK/)
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
