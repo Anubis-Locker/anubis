@@ -82,6 +82,8 @@ test('management dashboard authenticates, isolates history and never treats repo
   await expect(page.locator('#count')).toHaveText(String(installationCount))
   await expect(page.locator('#token')).toHaveValue('')
   await expect(page.locator('main')).toContainText('not a live presence signal')
+  await expect(page.locator('#managed-access-help')).toContainText('From another PC')
+  await expect(page.locator('#managed-access-help')).toContainText('not Windows screen sharing')
   await expect(page.locator('main')).toContainText('No Web address reported')
   await expect(page.locator('main')).toContainText('Web address outside the permitted HTTPS domain')
   await expect(page.locator('#rows a')).toHaveCount(1)

@@ -44,6 +44,7 @@ a { color: #9ccaff; }
 <section>
 <h2>Managed devices: <span id="agent-count">0</span></h2>
 <p class="muted">New devices require approval. Verify the complete fingerprint in the local application's About panel before approving. Online means the authenticated reverse tunnel is connected and its local Web endpoint is ready. No passwords or MCP keys are uploaded.</p>
+<p class="muted" id="managed-access-help">From another PC, sign in here and choose Open device for the approved Online installation. The device address alone does not grant access. A compatible Windows machine host offers its Windows workspace chooser inside the device page; each selected profile keeps its own password and data. This is access to Anubis on that machine, not Windows screen sharing. The standalone Web demo is a separate installation.</p>
 <div class="table">
 <table>
 <thead><tr><th>Device</th><th>Application / platform</th><th>Enrollment</th><th>Presence</th><th>Actions</th></tr></thead>
@@ -59,7 +60,7 @@ a { color: #9ccaff; }
 <button id="sign-out" type="button">Sign out</button>
 <span id="updated" class="muted"></span>
 </div>
-<p class="muted">An installation ID identifies an application profile, not necessarily a unique PC. Version 5.6.11 sends one report at startup, not a live presence signal. Recent reports do not prove that a machine is online or remotely accessible.</p>
+<p class="muted">An installation ID identifies an application profile, not necessarily a unique PC. A startup report is not a live presence signal. Recent reports do not prove that a machine is online or remotely accessible. Use Managed devices above for authenticated access.</p>
 <div class="table">
 <table>
 <thead><tr><th>Installation ID</th><th>Application / version</th><th>Platform</th><th>Last report</th><th>Remote access</th><th>History</th></tr></thead>
@@ -279,7 +280,7 @@ function access (cell, report) {
   const value = report.meta?.connection?.webUrl
   if (typeof value !== 'string') {
     text(cell, 'span', 'No Web address reported')
-    text(cell, 'small', 'Installing the desktop client alone does not publish a remote Web endpoint.')
+    text(cell, 'small', 'Use Managed devices above for approved reverse-tunnel access. A startup report is not an access grant.')
     return
   }
   let url
