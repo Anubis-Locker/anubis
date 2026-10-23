@@ -45,9 +45,7 @@ if (managedRpc) {
     nativeToken: process.env.tokenElecterm,
     getSessionPort: require('./session-process').getSessionPort
   })
-  process.on('message', message => {
-    if (message?.type === 'managed-auth-changed') browser.invalidateSessions()
-  })
+  require('../lib/managed-auth-invalidation').registerManagedAuthInvalidation(browser)
   process.once('disconnect', () => browser.close())
   process.once('exit', () => browser.close())
 }

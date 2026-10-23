@@ -1,13 +1,12 @@
 /**
  * editor (embedded in the common settings page) for the customizable
- * far-left sidebar icons. The select takes effect immediately — order of the
- * selected ids is the order shown in the sidebar.
+ * grouped sidebar icons. Selection order applies within each fixed group.
  */
 
 import { Select } from 'antd'
 import {
-  leftSidebarIconOptions,
-  defaultLeftSideBarIcons
+  groupedSidebarIconOptions,
+  groupedSidebarIconIds
 } from '../../common/left-sidebar-icon-defs'
 
 const { Option } = Select
@@ -15,13 +14,16 @@ const e = window.translate
 
 export default function SettingLeftSidebarIcons (props) {
   const { config, store } = props
-  const value = Array.isArray(config.leftSideBarIcons) && config.leftSideBarIcons.length
-    ? config.leftSideBarIcons
-    : [...defaultLeftSideBarIcons]
+  const value = groupedSidebarIconIds(config.leftSideBarIcons)
 
   const handleChange = (v) => {
     store.updateConfig({
-      leftSideBarIcons: v
+      leftSideBarIcons: [
+        ...v,
+        ...(Array.isArray(config.leftSideBarIcons)
+          ? config.leftSideBarIcons.filter(id => !groupedSidebarIconOptions.some(opt => opt.id === id))
+          : [])
+      ]
     })
   }
 
@@ -37,7 +39,7 @@ export default function SettingLeftSidebarIcons (props) {
         placeholder={e('leftSideBarIcons')}
       >
         {
-          leftSidebarIconOptions.map(opt => {
+          groupedSidebarIconOptions.map(opt => {
             return (
               <Option
                 key={opt.id}
@@ -49,6 +51,12 @@ export default function SettingLeftSidebarIcons (props) {
           })
         }
       </Select>
+      <p className='pd1t'>
+        Visibility and selection order apply within Tools and Other. Group order,
+        AI Agents, PRO Features, About and Hide are fixed. New bookmark and
+        Terminal themes remain available in the application menu and settings;
+        their older sidebar selections are preserved but do not add menu items.
+      </p>
     </div>
   )
 }

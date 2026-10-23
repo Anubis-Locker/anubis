@@ -24,6 +24,18 @@ export const defaultLeftSideBarIcons = leftSidebarIconOptions.map(o => o.id)
 // valid ids, for sanitizing persisted/synced config
 export const leftSidebarIconIds = new Set(leftSidebarIconOptions.map(o => o.id))
 
+// Legacy selections stay in saved config, but are accessed through the app menu.
+export const groupedSidebarIconOptions = [
+  'bookmarks', 'quickConnect', 'settingSync', 'widgets', 'setting'
+].map(id => leftSidebarIconOptions.find(option => option.id === id))
+
+export function groupedSidebarIconIds (value) {
+  const ids = groupedSidebarIconOptions.map(option => option.id)
+  return Array.isArray(value)
+    ? [...new Set(value.filter(id => ids.includes(id)))]
+    : ids
+}
+
 /**
  * returns a clean, ordered list of icon ids from a possibly-untrusted value:
  * unknown ids dropped, missing default ids left to the user's choice.

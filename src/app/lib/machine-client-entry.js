@@ -82,6 +82,8 @@ async function startMachineClient () {
   let disposeWebsites
   let sessions = []
   let updateController
+  let passwordSettingsPending = false
+  let elevationPending = false
   const intents = []
   let intentBusy = false
   let enqueuing = 0
@@ -334,30 +336,72 @@ async function startMachineClient () {
     const result = await connection.select({ target: { ...target }, user: user && { ...user } })
     return result.ok ? result : { ...failure(result.code), reconnecting: result.reconnecting }
   })
-  ipcMain.handle('machine-client-elevate', async event => {
-    if (!trusted(event)) return failure('ERR_HOST_CLIENT_ORIGIN')
+  const elevateClient = async (passwordSettings = false) => {
+    if (elevationPending) return failure('ERR_NATIVE_PASSWORD_BUSY')
     if (actor.elevated) return failure('ERR_HOST_ALREADY_ELEVATED')
     if (intentBusy || enqueuing) return failure('ERR_HOST_INTENT_BUSY')
     if (intents.length > 1) return failure('ERR_HOST_INTENT_MULTIPLE')
+    if (passwordSettings && intents.length) return failure('ERR_NATIVE_PASSWORD_BUSY')
     const quote = value => "'" + value.replace(/'/g, "''") + "'"
-    const args = ['--anubis-machine-client', '--anubis-service-name', serviceName, ...(intents[0]?.args || [])]
+    const pendingIntent = passwordSettings ? undefined : intents[0]
+    const args = ['--anubis-machine-client', '--anubis-service-name', serviceName, ...(pendingIntent?.args || [])]
       .map(quoteWindowsArgument).join(' ')
     if (args.length > 30000) return failure('ERR_HOST_INTENT_ARGUMENTS')
     const script = '$ErrorActionPreference=\'Stop\'; Start-Process -FilePath ' + quote(process.execPath) +
       ' -Verb RunAs -ArgumentList ' + quote(args) +
-      (intents[0] ? ' -WorkingDirectory ' + quote(intents[0].cwd) : '')
+      (pendingIntent ? ' -WorkingDirectory ' + quote(pendingIntent.cwd) : '')
+    elevationPending = true
     app.releaseSingleInstanceLock()
     try {
       await new Promise((resolve, reject) => {
         execFile(path.join(actor.systemDirectory, 'WindowsPowerShell', 'v1.0', 'powershell.exe'), [
           '-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')
-        ], { windowsHide: true, timeout: 120000 }, error => error ? reject(error) : resolve())
+        ], { shell: false, windowsHide: true, timeout: 120000 }, error => error ? reject(error) : resolve())
       })
       app.quit()
       return { ok: true }
     } catch {
       if (!app.requestSingleInstanceLock(instanceData)) app.quit()
       return failure('ERR_HOST_ELEVATION_CANCELLED')
+    } finally {
+      elevationPending = false
+    }
+  }
+  ipcMain.handle('machine-client-elevate', async event => {
+    if (!trusted(event)) return failure('ERR_HOST_CLIENT_ORIGIN')
+    return elevateClient()
+  })
+  ipcMain.handle('machine-client-password-settings', async event => {
+    const origin = require('node:url').pathToFileURL(path.resolve(__dirname, '../machine-client.html')).href
+    if (!trusted(event) || event.senderFrame.url !== origin) return failure('ERR_NATIVE_PASSWORD_ADMISSION')
+    if (passwordSettingsPending) return failure('ERR_NATIVE_PASSWORD_BUSY')
+    passwordSettingsPending = true
+    try {
+      if (!actor.elevated) {
+        const { response } = await dialog.showMessageBox(win, {
+          type: 'question',
+          buttons: ['Request Windows administrator approval', 'Cancel'],
+          defaultId: 1,
+          cancelId: 1,
+          message: 'Administrator approval is required before entering an application password.',
+          detail: 'The same machine client will restart through Windows UAC without any passwords. After restart, click SYSTEM password again. No new workspace or profile will be created.'
+        })
+        if (response !== 0) return { ok: false, code: 'ERR_NATIVE_PASSWORD_CANCELLED', committed: false }
+        return await elevateClient(true)
+      }
+      return await require('./native-password-settings').openNativePasswordSettings({
+        parent: win,
+        actor,
+        helper,
+        serviceName,
+        getContext: connection.getContext,
+        onChanged: async () => {
+          const result = await connection.select({ target: { target: 'system' } })
+          if (!result.ok) throw new Error('SYSTEM workspace refresh failed')
+        }
+      })
+    } finally {
+      passwordSettingsPending = false
     }
   })
   win.on('resize', fit)

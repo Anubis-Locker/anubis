@@ -9,6 +9,8 @@ const updateStatus = document.querySelector('#update-status')
 const intent = document.querySelector('#intent')
 const clearIntents = document.querySelector('#intent-clear')
 const intentStatus = document.querySelector('#intent-status')
+const systemPassword = document.querySelector('#system-password')
+const passwordStatus = document.querySelector('#password-status')
 
 function showIntents (value) {
   intent.hidden = !value.pending
@@ -127,6 +129,20 @@ update.addEventListener('click', async () => {
     updateStatus.textContent = 'ERR_HOST_UPDATE_FAILED'
   } finally {
     update.disabled = false
+  }
+})
+systemPassword.addEventListener('click', async () => {
+  systemPassword.disabled = true
+  try {
+    const result = await window.anubisHost.passwordSettings()
+    passwordStatus.textContent = result.ok
+      ? result.committed ? 'SYSTEM password saved; sign in again.' : 'Administrator approval requested; reopen SYSTEM password after restart.'
+      : result.committed ? 'Password committed; follow-up failed. Do not repeat the update. ' + result.code : result.code
+    if (result.elevationRequired) showFailure(result)
+  } catch {
+    passwordStatus.textContent = 'Password operation outcome unknown. Do not retry automatically.'
+  } finally {
+    systemPassword.disabled = false
   }
 })
 load()

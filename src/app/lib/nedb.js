@@ -102,7 +102,6 @@ function createDb (appPath, defaultUserName, { enc, dec } = {}) {
    * encrypted. The 'data' table is selective: only _id === 'userConfig'.
    */
   function needsEnc (dbName, id) {
-    if (!enc) return false
     if (dbName === 'data') return id === DATA_ENC_ID
     return ENC_TABLES.has(dbName)
   }
@@ -113,15 +112,23 @@ function createDb (appPath, defaultUserName, { enc, dec } = {}) {
    * serialised data field that was encrypted during writes.
    */
   function decryptDoc (dbName, doc) {
-    if (!dec || !doc || !needsEnc(dbName, doc._id)) return doc
-    if (!doc._encdata) return doc
+    if (!doc || !needsEnc(dbName, doc._id)) return doc
+    if (!Object.hasOwn(doc, '_encdata')) return doc
     try {
+      if (!dec || typeof doc._encdata !== 'string' || !doc._encdata.startsWith(ENC_PREFIX)) {
+        throw new Error('Invalid protected document')
+      }
       const plain = decryptData(doc._encdata)
       const parsed = JSON.parse(plain)
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('Invalid protected document')
+      }
       const { _encdata: _, ...rest } = doc
       return { ...rest, ...parsed }
     } catch (e) {
-      return doc
+      throw Object.assign(new Error('Protected profile data is unavailable'), {
+        code: 'ERR_PROFILE_DATA_UNAVAILABLE'
+      })
     }
   }
 
@@ -129,7 +136,7 @@ function createDb (appPath, defaultUserName, { enc, dec } = {}) {
    * Wrap a document for storage by encrypting its payload when needed.
    */
   function encryptDoc (dbName, doc) {
-    if (!needsEnc(dbName, doc._id)) return doc
+    if (!enc || !needsEnc(dbName, doc._id)) return doc
     const { _id, ...payload } = doc
     const jsonStr = JSON.stringify(payload)
     const encrypted = encryptData(jsonStr)
@@ -145,12 +152,20 @@ function createDb (appPath, defaultUserName, { enc, dec } = {}) {
       if (op === 'find') {
         db[dbName][op](...args, (err, results) => {
           if (err) return reject(err)
-          resolve((results || []).map(doc => decryptDoc(dbName, doc)))
+          try {
+            resolve((results || []).map(doc => decryptDoc(dbName, doc)))
+          } catch (error) {
+            reject(error)
+          }
         })
       } else if (op === 'findOne') {
         db[dbName][op](...args, (err, result) => {
           if (err) return reject(err)
-          resolve(decryptDoc(dbName, result))
+          try {
+            resolve(decryptDoc(dbName, result))
+          } catch (error) {
+            reject(error)
+          }
         })
       } else if (op === 'insert') {
         const original = args[0]
@@ -192,7 +207,7 @@ function createDb (appPath, defaultUserName, { enc, dec } = {}) {
       } else if (op === 'update') {
         const [query, updateObj, options] = args
         const qid = query._id || query.id
-        if (needsEnc(dbName, qid)) {
+        if (enc && needsEnc(dbName, qid)) {
           const newData = updateObj.$set || updateObj
           const { _id: _ignored, ...payload } = newData
           const encDoc = encryptDoc(dbName, { _id: qid, ...payload })

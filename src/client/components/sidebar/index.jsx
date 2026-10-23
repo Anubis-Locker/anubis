@@ -1,53 +1,41 @@
 import { useEffect } from 'react'
-import {
-  InfoCircleOutlined,
-  UpCircleOutlined,
-  AimOutlined,
-  MenuFoldOutlined
-} from '../icons/ui-icons'
-import { Tooltip } from 'antd'
 import SideBarPanel from './sidebar-panel'
-import MenuBtn from '../sys-menu/menu-btn'
-import {
-  settingMap,
-  modals
-} from '../../common/constants'
-import SideIcon from './side-icon'
 import SidePanel from './side-panel'
-import LeftSidebarIcons from './left-sidebar-icons'
+import GroupedSidebarMenu from './menu-preview'
 import TransferList from './transfer-list'
+import SideIcon from './side-icon'
+import { AimOutlined, UpCircleOutlined } from '../icons/ui-icons'
+import { Tooltip } from 'antd'
 import hasActiveInput from '../../common/has-active-input'
 import './sidebar.styl'
-
-const e = window.translate
 
 export default function Sidebar (props) {
   const {
     height,
     upgradeInfo,
-    settingTab,
-    settingItem,
-    isSyncingSetting,
+    zoom,
+    fileTransfers,
+    transferHistory,
+    transferTab,
     // expandable bookmarks/history panel
     leftSidePanelWidth,
     // responsive navigation column (0 when hidden)
     leftSideBarWidth,
     pinned,
-    fileTransfers,
     openedSideBar,
-    transferHistory,
-    transferTab,
     showModal,
-    showInfoModal,
     sidebarPanelTab,
-    openWidgetsModal,
-    zoom,
-    leftSideBarIcons,
-    widgetInstancesLength,
     isMobile
   } = props
 
   const { store } = window
+  const e = window.translate
+  const {
+    checkingRemoteVersion,
+    showUpgradeModal,
+    shouldUpgrade,
+    upgradePercent
+  } = upgradeInfo
 
   // pinned is desktop-only, like the right panel's: on mobile the panel spans
   // the viewport and there is no pin control to unpin it, so a pin persisted
@@ -95,38 +83,9 @@ export default function Sidebar (props) {
     store.openLeftSidePanel()
   }
 
-  const handleShowUpgrade = () => {
-    window.store.upgradeInfo.showUpgradeModal = true
-  }
-
-  const handleZoomReset = () => {
-    store.onZoomReset()
-  }
-
-  const handleToggleSidebar = () => {
-    store.toggleLeftSideBar()
-  }
-
   const {
-    onNewSsh,
-    openSetting,
-    openAbout,
-    openSettingSync,
-    openTerminalThemes,
     setLeftSidePanelWidth
   } = store
-  const {
-    showUpgradeModal,
-    upgradePercent,
-    checkingRemoteVersion,
-    shouldUpgrade
-  } = upgradeInfo
-  const showSetting = showModal === modals.setting
-  const settingActive = showSetting && settingTab === settingMap.setting && settingItem.id === 'setting-common'
-  const syncActive = showSetting && settingTab === settingMap.setting && settingItem.id === 'setting-sync'
-  const themeActive = showSetting && settingTab === settingMap.terminalThemes
-  const bookmarksActive = showSetting && settingTab === settingMap.bookmarks
-  const widgetsActive = showSetting && settingTab === settingMap.widgets
   const sideProps = openedSideBar
     ? {
         className: 'sidebar-list',
@@ -138,91 +97,38 @@ export default function Sidebar (props) {
         className: 'sidebar-list'
       }
   const sidebarProps = {
-    className: `sidebar type-${openedSideBar}${leftSideBarWidth === 0 ? ' collapsed' : ''}${leftSideBarWidth > 43 ? ' sidebar-expanded' : ''}`,
+    className: `sidebar sidebar-menu-preview type-${openedSideBar}${leftSideBarWidth === 0 ? ' collapsed' : ''}${leftSideBarWidth > 43 ? ' sidebar-expanded' : ' preview-compact'}`,
     style: {
       width: leftSideBarWidth,
       height
     }
   }
-  const transferProps = {
-    fileTransfers,
-    transferTab,
-    transferHistory
-  }
   return (
     <div {...sidebarProps}>
-      <div className='sidebar-bar btns'>
-        <div className='control-icon-wrap'>
-          <MenuBtn store={store} config={store.config} />
-        </div>
-        <LeftSidebarIcons
-          iconIds={leftSideBarIcons}
-          handleClickBookmark={handleClickBookmark}
-          onNewSsh={onNewSsh}
-          openSetting={openSetting}
-          openSettingSync={openSettingSync}
-          openTerminalThemes={openTerminalThemes}
-          openWidgetsModal={openWidgetsModal}
-          bookmarksActive={bookmarksActive || openedSideBar === 'bookmarks'}
-          themeActive={themeActive}
-          settingActive={settingActive}
-          syncActive={syncActive}
-          widgetsActive={widgetsActive}
-          isSyncingSetting={isSyncingSetting}
-          widgetInstancesLength={widgetInstancesLength}
+      <GroupedSidebarMenu
+        handleClickBookmark={handleClickBookmark}
+      >
+        <TransferList
+          fileTransfers={fileTransfers}
+          transferHistory={transferHistory}
+          transferTab={transferTab}
         />
-        <TransferList {...transferProps} />
-        <SideIcon
-          title={e('about')}
-          active={showInfoModal}
-          onClick={openAbout}
-        >
-          <InfoCircleOutlined
-            className='iblock font16 control-icon open-about-icon'
-          />
-        </SideIcon>
-        <SideIcon
-          title={e('hide')}
-          onClick={handleToggleSidebar}
-        >
-          <MenuFoldOutlined
-            className='iblock font16 control-icon hide-sidebar-icon'
-          />
-        </SideIcon>
-        {
-          Math.round((zoom ?? 1) * 100) !== 100
-            ? (
-              <SideIcon
-                title={e('resetzoom')}
-                onClick={handleZoomReset}
-              >
-                <AimOutlined
-                  className='iblock font16 control-icon zoom-reset-icon'
-                />
-              </SideIcon>
-              )
-            : null
-        }
-        {
-          !checkingRemoteVersion && !showUpgradeModal && shouldUpgrade
-            ? (
-              <Tooltip
-                title={`${e('upgrading')} ${upgradePercent || 0}%`}
-                placement='right'
-              >
-                <SideIcon
-                  title={e('checkForUpdate')}
-                  onClick={handleShowUpgrade}
-                >
-                  <UpCircleOutlined
-                    className='iblock font18 control-icon upgrade-icon'
-                  />
-                </SideIcon>
-              </Tooltip>
-              )
-            : null
-        }
-      </div>
+        {Math.round((zoom ?? 1) * 100) !== 100 && (
+          <SideIcon title={e('resetzoom')} onClick={() => store.onZoomReset()}>
+            <AimOutlined className='iblock font16 control-icon zoom-reset-icon' />
+          </SideIcon>
+        )}
+        {!checkingRemoteVersion && !showUpgradeModal && shouldUpgrade && (
+          <Tooltip title={`${e('upgrading')} ${upgradePercent || 0}%`} placement='right'>
+            <SideIcon
+              title={e('checkForUpdate')}
+              onClick={() => { store.upgradeInfo.showUpgradeModal = true }}
+            >
+              <UpCircleOutlined className='iblock font18 control-icon upgrade-icon' />
+            </SideIcon>
+          </Tooltip>
+        )}
+      </GroupedSidebarMenu>
       <SidePanel
         sideProps={sideProps}
         setLeftSidePanelWidth={setLeftSidePanelWidth}

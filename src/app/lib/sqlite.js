@@ -8,6 +8,7 @@ const { resolve } = require('path')
 const fs = require('fs')
 const uid = require('../common/uid')
 const { DatabaseSync } = require('node:sqlite')
+const { isDeepStrictEqual } = require('node:util')
 
 // Tables whose stored data values should be encrypted at rest
 const ENC_TABLES = new Set(['bookmarks', 'profiles', 'data', 'history', 'terminalCommandHistory', 'aiChatHistory'])
@@ -98,17 +99,60 @@ function createDb (appPath, defaultUserName, { enc, dec } = {}) {
 
   function toDoc (row, dbName) {
     if (!row) return null
-    const shouldDec = dec && shouldEncForRow(dbName, row._id)
-    const raw = shouldDec ? decryptData(row.data) : row.data
+    const encrypted = shouldEncForRow(dbName, row._id) &&
+      typeof row.data === 'string' && row.data.startsWith(ENC_PREFIX)
+    const protectedData = encrypted || (dbName === 'data' && row._id === DATA_ENC_ID)
     let r = {}
     try {
+      if (encrypted && !dec) throw new Error('Missing decryptor')
+      const raw = encrypted ? decryptData(row.data) : row.data
+      if (protectedData && (typeof raw !== 'string' || !raw)) {
+        throw new Error('Invalid protected document')
+      }
       r = JSON.parse(raw || '{}')
+      if (protectedData && (!r || typeof r !== 'object' || Array.isArray(r))) {
+        throw new Error('Invalid protected document')
+      }
     } catch (e) {
+      if (protectedData) {
+        throw Object.assign(new Error('Protected profile data is unavailable'), {
+          code: 'ERR_PROFILE_DATA_UNAVAILABLE'
+        })
+      }
       console.error(`Error parsing JSON for row ${row._id}:`, e.message)
     }
     return {
       ...r,
       _id: row._id
+    }
+  }
+
+  function compareAndSetUserConfig (expected, replacement) {
+    if ((expected !== null && expected?._id !== DATA_ENC_ID) ||
+        replacement?._id !== DATA_ENC_ID) {
+      throw new TypeError('Expected canonical user configuration')
+    }
+    dataDb.exec('BEGIN IMMEDIATE')
+    try {
+      const row = dataDb.prepare('SELECT * FROM data WHERE _id = ?').get(DATA_ENC_ID)
+      if (!isDeepStrictEqual(toDoc(row, 'data'), expected)) {
+        dataDb.exec('ROLLBACK')
+        return false
+      }
+      const next = toRow(replacement, 'data')
+      const { _id, id, ...payload } = replacement
+      if (!enc || !dec || next.data === ENC_PREFIX + JSON.stringify(payload) ||
+          !isDeepStrictEqual(toDoc(next, 'data'), replacement)) {
+        throw Object.assign(new Error('Protected profile encryption is unavailable'), {
+          code: 'ERR_PROFILE_DATA_UNAVAILABLE'
+        })
+      }
+      dataDb.prepare('INSERT OR REPLACE INTO data (_id, data) VALUES (?, ?)').run(next._id, next.data)
+      dataDb.exec('COMMIT')
+      return true
+    } catch (error) {
+      dataDb.exec('ROLLBACK')
+      throw error
     }
   }
 
@@ -190,6 +234,7 @@ function createDb (appPath, defaultUserName, { enc, dec } = {}) {
 
   return {
     dbAction,
+    compareAndSetUserConfig,
     tables
   }
 }

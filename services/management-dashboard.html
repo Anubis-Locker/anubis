@@ -43,11 +43,15 @@ a { color: #9ccaff; }
 <main id="inventory" hidden>
 <section>
 <h2>Managed devices: <span id="agent-count">0</span></h2>
+<p id="agent-summary" role="status"></p>
+<p id="managed-status" class="error" role="status"></p>
 <p class="muted">New devices require approval. Verify the complete fingerprint in the local application's About panel before approving. Online means the authenticated reverse tunnel is connected and its local Web endpoint is ready. No passwords or MCP keys are uploaded.</p>
 <p class="muted" id="managed-access-help">From another PC, sign in here and choose Open device for the approved Online installation. The device address alone does not grant access. A compatible Windows machine host offers its Windows workspace chooser inside the device page; each selected profile keeps its own password and data. This is access to Anubis on that machine, not Windows screen sharing. The standalone Web demo is a separate installation.</p>
+<p class="muted" id="connection-auth-help">Copy device URL copies only the nonsecret HTTPS address, not authorization. A different browser or incognito window must sign in to this administrator panel and use Open device again. If the selected app profile has a password, obtain its existing app-profile password from the profile owner; this is not a Windows/RDP password or the administrator token. A profile without an app password may open directly after browser authorization. This setting is not advertised by inventory, and this panel cannot retrieve, set or reset profile passwords. No SSH/RDP/VNC address, port or password is advertised by this inventory.</p>
+<p class="muted">Windows accounts, SIDs, sessions and workspace availability are not advertised in this inventory. On compatible Windows machine hosts, Open device starts with the separate SYSTEM profile; explicitly select an available logged-on user inside that page for that user's data. MCP stays in its administrative workspace. Neither an online tunnel nor a temporary MCP grant proves a successful application login or protocol connection.</p>
 <div class="table">
 <table>
-<thead><tr><th>Device</th><th>Application / platform</th><th>Enrollment</th><th>Presence</th><th>Actions</th></tr></thead>
+<thead><tr><th>Device</th><th>Application / platform</th><th>Enrollment</th><th>Presence</th><th>Connection</th><th>Actions</th></tr></thead>
 <tbody id="agent-rows"></tbody>
 </table>
 </div>
@@ -55,11 +59,12 @@ a { color: #9ccaff; }
 </section>
 <section>
 <div class="toolbar">
-<h2>Installations: <span id="count">0</span></h2>
+<h2>Startup reports (not connection inventory): <span id="count">0</span></h2>
 <button id="refresh" type="button">Refresh</button>
 <button id="sign-out" type="button">Sign out</button>
 <span id="updated" class="muted"></span>
 </div>
+<p id="reports-status" class="error" role="status"></p>
 <p class="muted">An installation ID identifies an application profile, not necessarily a unique PC. A startup report is not a live presence signal. Recent reports do not prove that a machine is online or remotely accessible. Use Managed devices above for authenticated access.</p>
 <div class="table">
 <table>
@@ -72,6 +77,7 @@ a { color: #9ccaff; }
 <section id="mcp-access" hidden>
 <div class="toolbar"><h2 id="mcp-title"></h2><button id="close-mcp" type="button">Close MCP credentials</button></div>
 <p class="muted">Treat this temporary token as a secret. It expires after at most one hour and grants access only to this device's MCP endpoint, not its browser UI. The local authenticated MCP widget must be running; its own key never leaves the device.</p>
+<p class="muted">Grant issued does not mean MCP is running or its profile is unlocked. This panel does not probe the device or execute tools. Closing this panel discards the displayed token; it does not revoke it. Browser authorization and unused MCP grants expire naturally; device-wide Revoke is a separate action.</p>
 <pre id="mcp-credentials"></pre>
 </section>
 <section id="history" hidden>
@@ -91,6 +97,10 @@ let controller
 let selected = ''
 let selectedMcp = ''
 let mcpGeneration = 0
+let mcpTimer
+let latestAgents = []
+let agentsFresh = false
+const connecting = new Map()
 
 function message (text, failed = false) {
   element('message').textContent = text
@@ -105,6 +115,7 @@ function text (parent, tag, value) {
 }
 
 function timestamp (value) {
+  if (value === undefined || value === null || value === '') return 'Not reported'
   const date = new Date(value)
   return Number.isFinite(date.getTime()) ? date.toLocaleString() : 'Not reported'
 }
@@ -113,6 +124,9 @@ function signOut () {
   generation++
   token = ''
   selected = ''
+  latestAgents = []
+  agentsFresh = false
+  connecting.clear()
   closeMcp()
   clearTimeout(timer)
   controller?.abort()
@@ -120,6 +134,9 @@ function signOut () {
   element('rows').replaceChildren()
   element('agent-rows').replaceChildren()
   element('agent-count').textContent = '0'
+  element('agent-summary').textContent = ''
+  element('managed-status').textContent = ''
+  element('reports-status').textContent = ''
   element('reports').replaceChildren()
   element('count').textContent = '0'
   element('updated').textContent = ''
@@ -132,6 +149,7 @@ function signOut () {
 }
 
 function closeMcp () {
+  clearTimeout(mcpTimer)
   mcpGeneration++
   selectedMcp = ''
   element('mcp-title').textContent = ''
@@ -171,6 +189,7 @@ async function changeAgent (agent, action) {
 }
 
 function agentUrl (value, agent, pathname = '/') {
+  if (typeof value !== 'string') throw new Error('No live managed address was advertised')
   const url = new URL(value)
   const expected = 'device-' + agent.id.replace(/-/g, '') + '.anubis.locker'
   if (url.protocol !== 'https:' || url.hostname !== expected || url.port ||
@@ -180,16 +199,60 @@ function agentUrl (value, agent, pathname = '/') {
   return url
 }
 
+async function readyAgent (agent, session) {
+  let data
+  try {
+    data = await request('/api/agents', session)
+    if (!data || session !== generation) return
+    if (!Array.isArray(data.agents)) throw new Error('Invalid managed device response')
+  } catch (error) {
+    if (session === generation) {
+      renderAgents(latestAgents, false)
+      element('managed-status').textContent = 'Managed inventory unavailable: ' + error.message
+    }
+    throw error
+  }
+  renderAgents(data.agents)
+  element('managed-status').textContent = ''
+  const live = data.agents.find(value => value.id === agent.id)
+  if (!live || !/^[0-9a-f]{64}$/.test(agent.fingerprint) || live.fingerprint !== agent.fingerprint) {
+    throw new Error('Device identity changed. Refresh and verify its fingerprint before connecting.')
+  }
+  if (live.status !== 'approved' || live.online !== true) {
+    throw new Error('Device is not approved and online. No access grant was requested.')
+  }
+  agentUrl(live.url, live)
+  return live
+}
+
+async function copyAgentUrl (agent) {
+  try {
+    if (!navigator.clipboard) throw new Error('Clipboard unavailable; select and copy the displayed address.')
+    await navigator.clipboard.writeText(agentUrl(agent.url, agent).href)
+    message('Device URL copied without credentials. New browsers must authorize through Open device.')
+  } catch (error) {
+    message('Unable to copy address: ' + error.message, true)
+  }
+}
+
 async function openMcp (agent) {
   const session = generation
   closeMcp()
   const selection = mcpGeneration
   try {
-    const result = await request('/api/agents/' + encodeURIComponent(agent.id) + '/mcp-token', session, undefined, 'POST')
+    const live = await readyAgent(agent, session)
+    if (!live || session !== generation || selection !== mcpGeneration) return
+    const result = await request('/api/agents/' + encodeURIComponent(live.id) + '/mcp-token', session, undefined, 'POST')
     if (!result || session !== generation || selection !== mcpGeneration) return
+    const current = latestAgents.find(value => value.id === live.id)
+    if (!agentsFresh || !current || current.fingerprint !== live.fingerprint ||
+        current.status !== 'approved' || current.online !== true) {
+      throw new Error('Device availability changed while issuing MCP access. Refresh before continuing.')
+    }
     const url = agentUrl(result.url, agent, '/mcp')
     if (result.scope !== 'mcp' || typeof result.token !== 'string' ||
-        !/^[0-9a-f]{64}$/.test(result.token) || !Number.isFinite(result.expiresAt)) {
+        !/^[0-9a-f]{64}$/.test(result.token) || !Number.isFinite(result.expiresAt) ||
+        result.expiresAt <= Date.now() || result.expiresAt > Date.now() + 3600000) {
       throw new Error('Invalid managed MCP credentials')
     }
     selectedMcp = agent.id
@@ -197,20 +260,36 @@ async function openMcp (agent) {
     element('mcp-credentials').textContent = 'URL: ' + url.href +
       '\nAuthorization: Bearer ' + result.token + '\nExpires: ' + timestamp(result.expiresAt)
     element('mcp-access').hidden = false
+    mcpTimer = setTimeout(closeMcp, result.expiresAt - Date.now())
   } catch (error) {
     if (session === generation && selection === mcpGeneration) message('Unable to issue MCP access: ' + error.message, true)
   }
 }
 
 async function openAgent (agent) {
+  if (connecting.has(agent.id)) return
   const session = generation
   const panel = window.open('about:blank', '_blank')
   if (!panel) return message('Allow a new tab to open this device.', true)
   panel.opener = null
+  const operation = {}
+  connecting.set(agent.id, operation)
+  renderAgents(latestAgents, agentsFresh)
+  message('Checking live device identity before browser authorization...')
   try {
-    const result = await request('/api/agents/' + encodeURIComponent(agent.id) + '/connect', session, undefined, 'POST')
+    const live = await readyAgent(agent, session)
+    if (!live || session !== generation || panel.closed) return panel.close()
+    const result = await request('/api/agents/' + encodeURIComponent(live.id) + '/connect', session, undefined, 'POST')
     if (!result || session !== generation) return panel.close()
+    const current = latestAgents.find(value => value.id === live.id)
+    if (!agentsFresh || !current || current.fingerprint !== live.fingerprint ||
+        current.status !== 'approved' || current.online !== true) {
+      throw new Error('Device availability changed while issuing browser access. No ticket was exchanged; the unused ticket expires automatically.')
+    }
     const url = agentUrl(result.url, agent)
+    if (typeof result.ticket !== 'string' || !/^[0-9a-f]{64}$/.test(result.ticket) ||
+        !Number.isFinite(result.expiresAt)) throw new Error('Invalid browser authorization ticket')
+    if (panel.closed) return
     const response = await fetch(url.origin + '/_anubis/connect', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -222,50 +301,92 @@ async function openAgent (agent) {
     if (!response.ok) throw new Error('Connection ticket rejected: HTTP ' + response.status)
     if (session !== generation) return panel.close()
     panel.location.href = url.href
+    message('Browser authorized; device page requested in a new tab. Application/profile sign-in may still be required. This is not a verified terminal or remote-screen connection.')
   } catch (error) {
     panel.close()
     if (session === generation) message('Unable to connect to device: ' + error.message, true)
+  } finally {
+    if (connecting.get(agent.id) === operation) {
+      connecting.delete(agent.id)
+      if (session === generation) renderAgents(latestAgents, agentsFresh)
+    }
   }
 }
 
-function renderAgents (agents) {
-  if (selectedMcp && !agents.some(agent => agent.id === selectedMcp && agent.status === 'approved')) closeMcp()
-  const checked = new Set(Array.from(element('agent-rows').querySelectorAll('input:checked')).map(input => input.value))
+function renderAgents (agents, fresh = true) {
+  latestAgents = agents
+  agentsFresh = fresh
+  if (selectedMcp && (!fresh || !agents.some(agent => agent.id === selectedMcp && agent.status === 'approved' && agent.online === true))) closeMcp()
+  const checked = new Set(Array.from(element('agent-rows').querySelectorAll('input:checked'))
+    .map(input => input.value + ':' + input.dataset.fingerprint))
   element('agent-rows').replaceChildren()
-  element('agent-count').textContent = agents.length
-  element('agents-empty').hidden = agents.length !== 0
-  for (const agent of agents) {
+  element('agent-count').textContent = fresh ? agents.length : agents.length ? agents.length + ' (last known)' : 'Unavailable'
+  element('agent-summary').textContent = fresh
+    ? agents.filter(agent => agent.status === 'approved' && agent.online === true).length + ' approved devices online / ' + agents.length + ' registered'
+    : 'Stale inventory: current availability is unknown. Access actions are disabled until a successful refresh.'
+  element('agents-empty').hidden = !fresh || agents.length !== 0
+  const ordered = [...agents].sort((a, b) =>
+    Number(b.status === 'approved' && b.online === true) - Number(a.status === 'approved' && a.online === true) ||
+    String(a.label || a.id).localeCompare(String(b.label || b.id)))
+  for (const agent of ordered) {
     const row = text(element('agent-rows'), 'tr', '')
+    row.dataset.agentId = agent.id
     const name = text(row, 'td', agent.label)
     text(name, 'small', agent.id)
+    if (agent.createdAt) text(name, 'small', 'Enrolled: ' + timestamp(agent.createdAt))
     const application = text(row, 'td', agent.app + ' ' + agent.version)
     text(application, 'small', agent.platform + ' ' + agent.arch)
     const enrollment = text(row, 'td', agent.status)
     text(enrollment, 'small', 'SHA-256 fingerprint')
     text(enrollment, 'code', agent.fingerprint)
-    const presence = text(row, 'td', agent.online ? 'Online' : 'Offline')
+    const presence = text(row, 'td', fresh ? agent.online ? 'Online' : 'Offline' : 'Unknown (stale)')
     text(presence, 'small', agent.lastSeen ? timestamp(agent.lastSeen) : 'No authenticated signal')
+    const connection = text(row, 'td', '')
+    let address
+    if (agent.status === 'approved' && agent.online === true) {
+      try { address = agentUrl(agent.url, agent) } catch (error) {
+        text(connection, 'small', error.message).className = 'error'
+      }
+    }
+    if (address) {
+      text(connection, 'code', address.href).className = 'managed-address'
+      const copy = text(connection, 'button', 'Copy device URL')
+      copy.disabled = !fresh
+      copy.addEventListener('click', () => copyAgentUrl(agent))
+      text(connection, 'small', fresh
+        ? 'HTTPS address only. Use Open device to authorize this browser.'
+        : 'Last advertised address only; availability is unknown.')
+    } else {
+      text(connection, 'small', agent.status !== 'approved'
+        ? 'Approval required before access.'
+        : agent.online
+          ? 'No valid managed address was advertised. Refresh inventory.'
+          : 'No live managed address. Restore the device tunnel first.')
+    }
     const actions = text(row, 'td', '')
     if (agent.status !== 'approved') {
       const label = text(actions, 'label', '')
       const verified = document.createElement('input')
       verified.type = 'checkbox'
       verified.value = agent.id
-      verified.checked = checked.has(agent.id)
+      verified.dataset.fingerprint = agent.fingerprint
+      verified.checked = checked.has(agent.id + ':' + agent.fingerprint)
+      verified.disabled = !fresh
       label.append(verified)
       text(label, 'span', 'Fingerprint verified locally')
       const approve = text(actions, 'button', 'Approve')
-      approve.disabled = !verified.checked
-      verified.addEventListener('change', () => { approve.disabled = !verified.checked })
+      approve.disabled = !fresh || !verified.checked
+      verified.addEventListener('change', () => { approve.disabled = !fresh || !verified.checked })
       approve.addEventListener('click', () => changeAgent(agent, 'approve'))
     } else {
       const open = text(actions, 'button', 'Open device')
-      open.disabled = !agent.online
+      open.disabled = !fresh || !address || connecting.has(agent.id)
       open.addEventListener('click', () => openAgent(agent))
       const mcp = text(actions, 'button', 'MCP access')
-      mcp.disabled = !agent.online
+      mcp.disabled = !fresh || !address || connecting.has(agent.id)
       mcp.addEventListener('click', () => openMcp(agent))
       const revoke = text(actions, 'button', 'Revoke')
+      revoke.disabled = !fresh
       revoke.addEventListener('click', () => {
         if (revoke.dataset.confirm !== 'yes') {
           revoke.dataset.confirm = 'yes'
@@ -359,25 +480,46 @@ async function refresh () {
   element('refresh').disabled = true
   element('sign-in').disabled = true
   try {
-    const [data, managed] = await Promise.all([
+    const [reportsResult, managedResult] = await Promise.allSettled([
       request('/api/installs', session, pending.signal),
       request('/api/agents', session, pending.signal)
     ])
-    if (!data || !managed || session !== generation) return
-    if (!Array.isArray(data.installs)) throw new Error('Invalid installation inventory response')
-    if (!Array.isArray(managed.agents)) throw new Error('Invalid managed device response')
-    render(data.installs)
-    renderAgents(managed.agents)
-    element('token').value = ''
-    element('login').hidden = true
-    element('inventory').hidden = false
-    element('updated').textContent = 'Updated: ' + new Date().toLocaleTimeString()
-    message('')
+    if (session !== generation || controller !== pending) return
+    const failures = []
+    let available = false
+    try {
+      if (managedResult.status === 'rejected') throw managedResult.reason
+      if (!Array.isArray(managedResult.value?.agents)) throw new Error('Invalid managed device response')
+      renderAgents(managedResult.value.agents)
+      element('managed-status').textContent = ''
+      available = true
+    } catch (error) {
+      renderAgents(latestAgents, false)
+      element('managed-status').textContent = 'Managed inventory unavailable: ' + error.message
+      failures.push(element('managed-status').textContent)
+    }
+    try {
+      if (reportsResult.status === 'rejected') throw reportsResult.reason
+      if (!Array.isArray(reportsResult.value?.installs)) throw new Error('Invalid installation inventory response')
+      render(reportsResult.value.installs)
+      element('reports-status').textContent = ''
+      available = true
+    } catch (error) {
+      element('reports-status').textContent = 'Startup reports unavailable or stale: ' + error.message
+      failures.push(element('reports-status').textContent)
+    }
+    if (available) {
+      element('token').value = ''
+      element('login').hidden = true
+      element('inventory').hidden = false
+      element('updated').textContent = 'Refresh attempted: ' + new Date().toLocaleTimeString()
+    }
+    message(failures.join(' '), failures.length > 0)
   } catch (error) {
     if (session === generation) message('Unable to refresh inventory: ' + error.message, true)
   } finally {
     clearTimeout(timeout)
-    if (session === generation) {
+    if (session === generation && controller === pending) {
       element('refresh').disabled = false
       element('sign-in').disabled = false
       if (token) timer = setTimeout(refresh, 10000)

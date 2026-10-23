@@ -154,12 +154,15 @@ test('managed MCP credentials validate their origin and clear on close, revocati
   const agent = {
     id: '00000000-0000-4000-8000-000000000001',
     label: 'Managed MCP fixture',
+    fingerprint: 'b'.repeat(64),
+    url: 'https://device-00000000000040008000000000000001.anubis.locker',
     app: 'anubis-desktop',
     version: '5.6.12',
     status: 'approved',
     online: true
   }
   const credential = 'a'.repeat(64)
+  let lifetime = 3600000
   let url = 'https://untrusted.invalid/mcp'
   browser = await chromium.launch({ headless: true })
   const page = await browser.newPage()
@@ -171,7 +174,7 @@ test('managed MCP credentials validate their origin and clear on close, revocati
   await page.route('**/api/agents/*/mcp-token', route => {
     assert.equal(route.request().method(), 'POST')
     assert.equal(route.request().headers().authorization, 'Bearer ' + adminToken)
-    return route.fulfill({ json: { url, token: credential, scope: 'mcp', expiresAt: Date.now() + 3600000 } })
+    return route.fulfill({ json: { url, token: credential, scope: 'mcp', expiresAt: Date.now() + lifetime } })
   })
   await page.goto(base + '/admin')
   await page.locator('#token').fill(adminToken)
@@ -186,6 +189,16 @@ test('managed MCP credentials validate their origin and clear on close, revocati
   await expect(page.locator('#mcp-credentials')).toContainText(url)
   await page.locator('#close-mcp').click()
   await expect(page.locator('#mcp-credentials')).toHaveText('')
+  lifetime = -1
+  await mcp.click()
+  await expect(page.locator('#message')).toContainText('Invalid managed MCP credentials')
+  await expect(page.locator('#mcp-access')).toBeHidden()
+  lifetime = 1000
+  await mcp.click()
+  await expect(page.locator('#mcp-access')).toBeVisible()
+  await expect(page.locator('#mcp-access')).toBeHidden({ timeout: 3000 })
+  await expect(page.locator('#mcp-credentials')).toHaveText('')
+  lifetime = 3600000
   await mcp.click()
   await expect(page.locator('#mcp-access')).toBeVisible()
   agent.status = 'revoked'

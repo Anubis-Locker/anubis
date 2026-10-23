@@ -39,6 +39,7 @@ function initManagedBrowser (app, {
   const sessions = new Map()
   const sockets = new Set()
   const sftpSessions = new Map()
+  let authGeneration = 0
   let files
   let failedLogins = 0
   let loginWindow = now()
@@ -79,8 +80,10 @@ function initManagedBrowser (app, {
     }
     try {
       const pathname = req.path
+      const generation = authGeneration
       if (req.method === 'GET' && ['/', '/index.html'].includes(pathname)) {
         const info = await rpc('browserInfo')
+        if (generation !== authGeneration) return res.status(401).json({ error: 'Desktop authentication required' })
         const token = info.requirePassword ? '' : issue(true)
         const version = rendererVersion
         const globals = {
@@ -109,6 +112,7 @@ function initManagedBrowser (app, {
         }
         if (++failedLogins > 10) return res.status(429).json({ error: 'Too many desktop login attempts' })
         const ok = await rpc('browserLogin', [req.body?.password])
+        if (generation !== authGeneration) return res.status(401).json({ error: 'Desktop authentication required' })
         if (!ok) return res.status(401).json({ error: 'Invalid desktop password' })
         return res.json(issue(true))
       }
@@ -116,6 +120,7 @@ function initManagedBrowser (app, {
       if (req.method === 'GET' && pathname === '/api/get-constants') {
         if (!session) return res.status(401).json({ error: 'Desktop authentication required' })
         const info = await rpc('browserInfo')
+        if (generation !== authGeneration) return res.status(401).json({ error: 'Desktop authentication required' })
         return res.json({
           ...info,
           config: { ...info.config, tokenElecterm: req.headers.token || req.query.token }
@@ -138,6 +143,7 @@ function initManagedBrowser (app, {
         req.ws.once('close', () => sockets.delete(req.ws))
         req.managedSession = session
         req.managedRpc = (func, args) => {
+          if (!session.unlocked) throw new Error('Desktop authentication required')
           if (['managedMcpEndpoint', 'browserInfo', 'browserLogin'].includes(func)) {
             throw new Error('Internal managed function is not a browser API')
           }
@@ -176,6 +182,7 @@ function initManagedBrowser (app, {
       sockets.add(browser)
       sockets.add(upstream)
       browser.on('message', (data, binary) => {
+        if (!req.managedSession.unlocked) return browser.close(1008, 'Desktop authentication required')
         binary = typeof binary === 'boolean' ? binary : typeof data !== 'string'
         if (upstream.readyState === WebSocket.OPEN) {
           if (upstream.bufferedAmount > 16 * 1024 * 1024) return browser.close(1013, 'Connection is overloaded')
@@ -216,8 +223,19 @@ function initManagedBrowser (app, {
   }
   return {
     invalidateSessions: () => {
+      authGeneration++
+      for (const session of sessions.values()) session.unlocked = false
       sessions.clear()
-      for (const socket of sockets) socket.close(1008, 'Desktop password changed; sign in again')
+      return Promise.all([...sockets].map(socket => new Promise(resolve => {
+        if (socket.readyState === WebSocket.CLOSED) return resolve()
+        const timer = setTimeout(() => socket.terminate(), 100)
+        timer.unref()
+        socket.once('close', () => {
+          clearTimeout(timer)
+          resolve()
+        })
+        socket.close(1008, 'Desktop password changed; sign in again')
+      })))
     },
     close: () => {
       sessions.clear()

@@ -11,6 +11,7 @@ const assert = require('node:assert/strict')
 const os = require('os')
 const fs = require('fs')
 const path = require('path')
+const { data: { dirName: brandDirName } } = require('../../../src/app/common/brand')
 
 // ---------------------------------------------------------------------------
 // Simple reversible enc/dec for tests (XOR-rotate + base64)
@@ -106,7 +107,7 @@ describe('sqlite createDb', () => {
 
     before(() => {
       tmpDir = makeTmpDir()
-      dbFolder = path.join(tmpDir, 'electerm', 'users', 'testuser')
+      dbFolder = path.join(tmpDir, brandDirName, 'users', 'testuser')
       db = createDb(tmpDir, 'testuser', encOpts)
     })
 
@@ -208,9 +209,10 @@ describe('nedb createDb', () => {
     let db
     let tmpDir
 
-    before(() => {
+    before(async () => {
       tmpDir = makeTmpDir()
       db = createDb(tmpDir, 'testuser')
+      await Promise.all(db.tables.map(table => db.dbAction(table, 'find', {})))
     })
 
     after(() => {
@@ -256,9 +258,10 @@ describe('nedb createDb', () => {
     let db
     let tmpDir
 
-    before(() => {
+    before(async () => {
       tmpDir = makeTmpDir()
       db = createDb(tmpDir, 'testuser', encOpts)
+      await Promise.all(db.tables.map(table => db.dbAction(table, 'find', {})))
     })
 
     after(() => {
@@ -272,7 +275,7 @@ describe('nedb createDb', () => {
 
       // Read raw nedb file to confirm the value is not plain text
       const nedbPath = path.join(
-        tmpDir, 'electerm', 'users', 'testuser', 'electerm.bookmarks.nedb'
+        tmpDir, brandDirName, 'users', 'testuser', 'electerm.bookmarks.nedb'
       )
       const raw = fs.readFileSync(nedbPath, 'utf8')
       assert.ok(!raw.includes('hunter2'), 'nedb file should NOT contain plaintext password')
@@ -306,7 +309,7 @@ describe('nedb createDb', () => {
       await db.dbAction('data', 'insert', { _id: 'userConfig', secret: 'mySecret' })
       await db.dbAction('data', 'insert', { _id: 'version', value: '1.0.0' })
       const nedbPath = path.join(
-        tmpDir, 'electerm', 'users', 'testuser', 'electerm.data.nedb'
+        tmpDir, brandDirName, 'users', 'testuser', 'electerm.data.nedb'
       )
       const raw = fs.readFileSync(nedbPath, 'utf8')
       assert.ok(!raw.includes('mySecret'), 'userConfig secret should NOT be plaintext in nedb')
@@ -327,7 +330,7 @@ describe('nedb createDb', () => {
       const doc = { name: 'myProfile', secret: 'profileSecret' }
       await db.dbAction('profiles', 'insert', doc)
       const nedbPath = path.join(
-        tmpDir, 'electerm', 'users', 'testuser', 'electerm.profiles.nedb'
+        tmpDir, brandDirName, 'users', 'testuser', 'electerm.profiles.nedb'
       )
       const raw = fs.readFileSync(nedbPath, 'utf8')
       assert.ok(!raw.includes('profileSecret'), 'profiles nedb should NOT contain plaintext secret')
@@ -337,7 +340,7 @@ describe('nedb createDb', () => {
       const doc = { cmd: 'echo hello' }
       await db.dbAction('quickCommands', 'insert', doc)
       const nedbPath = path.join(
-        tmpDir, 'electerm', 'users', 'testuser', 'electerm.quickCommands.nedb'
+        tmpDir, brandDirName, 'users', 'testuser', 'electerm.quickCommands.nedb'
       )
       const raw = fs.readFileSync(nedbPath, 'utf8')
       assert.ok(raw.includes('echo hello'), 'non-enc tables should store data as plaintext')

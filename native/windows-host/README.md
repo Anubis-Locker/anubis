@@ -196,8 +196,9 @@ Use `broker-client --stdio` for the guarded native broker protocol:
   worker and never starts an engine. SYSTEM resolution requires the current
   canonical machine context ID.
 
-No broker endpoint accepts a general executable, command, profile path, or
-credentials. This protocol requires rebuilding/updating the registered service;
+No context endpoint accepts a general executable, command, profile path, or
+credentials. The separate native-only machine-password admission below never
+accepts Windows credentials. This protocol requires rebuilding/updating the registered service;
 an older host rejects the new operations explicitly, not a simulated context
 list. No production service or allowlist is changed by implementing the adapter.
 Windows-token launch acceptance must use the guarded isolated QA procedures,
@@ -207,6 +208,166 @@ sanitization, cross-browser isolation, binary/early frames, and revocation using
 a controlled broker boundary. Native tests cover strict request guards and
 retained-context/logon matching; they do not substitute for full SCM/WTS runtime
 acceptance of the newly integrated guarded route.
+
+### Native-only canonical machine password admission
+
+This is an authorization/transport primitive, not a password reset, password
+retrieval API, or complete Settings implementation. It adds no HTTP, WebSocket,
+gateway, or admin-panel endpoint. It never opens a profile/DPAPI/password file.
+The application must integrate the runtime handler described here before this
+operation can succeed. Older runtimes still support `describe` and reject the
+new request; no fallback changes a profile.
+
+An **actual local interactive elevated Windows administrator** may submit an
+application-password establishment/rotation request. Membership asserted by a
+renderer is not authority. The shell must verify its trusted native origin and
+explicitly elevate/restart through Windows UAC **before** collecting passwords.
+`--stdio` is private redirected anonymous stdin/stdout, never an interactive
+terminal, inherited console, log stream, file, or UAC argument channel.
+The private bridge verifies both standard handles are pipes before reading
+any input; file/console redirection is rejected. This also enforces the
+existing private-only intent of `--stdio` for older operations.
+
+Use the fixed protected installed helper:
+
+```text
+anubis-host.exe broker-client --name AnubisHost --stdio
+stdin (one JSON line):
+{"version":1,"operation":"native-password-update","target":"system",
+ "contextId":"<current canonical 32 lowercase hex context>",
+ "oldPassword":"<existing application password or empty>",
+ "newPassword":"<nonempty new application password>"}
+```
+
+The new operations require every illustrated field with exact casing and no
+duplicates, nulls, additional fields, identity claims, or user target.
+Passwords are strings of at most **4096 UTF-16 code units each**, including
+surrogate pairs as two units. New must be nonempty. New-operation frames,
+including JSON escaping, metadata, and final LF, must be **at most 65536
+bytes**. Invalid UTF-8 and unpaired JSON surrogate
+escapes are rejected rather than silently changing passwords. The worst-case
+two 4096-unit control-character strings fit. Existing
+operations retain their decoded-request 8192-byte ceiling. The shared broker
+has eight connection slots and a 45-second I/O deadline. The shell must bound
+helper lifetime and terminate its owned helper on cancellation; the helper's
+existing private bridge bounds broker I/O to 40 seconds. No selector/argv mode
+accepts either new operation.
+
+The broker impersonates the real pipe client and retains a process handle.
+It checks the actual primary SID/session/elevation/logon SID against the
+impersonation token, unrestricted enabled administrator membership, and the
+full 64-bit process creation FILETIME. Native initiation additionally requires
+an interactive non-network logon, a nonzero session and a non-SYSTEM caller.
+In particular, the SYSTEM runtime cannot mint this authority on behalf of a
+Web request. No DACL is weakened. A restricted/non-elevated caller is denied.
+
+The service retains **one** pending operation globally (otherwise
+`ERR_NATIVE_PASSWORD_BUSY`). It binds a random 256-bit one-use admission to:
+
+* The real initiating SID/logon SID/session/PID/full creation and live process.
+* `native-password-update`, the exact current canonical context, the retained
+  owned runtime PID/full creation, and a duplicated live runtime handle.
+* Only the in-memory old/new application passwords from that request.
+
+The canonical runtime must still have an actual unrestricted SYSTEM session-0
+token and the exact protected packaged runtime image. The host dials its
+existing control pipe anonymously (no SYSTEM impersonation delegation),
+checks its kernel-reported server PID against that retained generation, and
+validates the existing restricted pipe ACL. It sends **no passwords or caller
+claims** to that BA-accessible pipe:
+
+```json
+{"version":1,"operation":"native-password-update","contextId":"<32hex>","admissionId":"<64hex>"}
+```
+
+The runtime accepts ONLY this exact packet shape for the new operation. It
+must NOT trust any additional credentials, SID/PID or caller fields. It spawns
+the exact installed protected helper as its **direct child**, with private
+stdin/stdout, and submits:
+
+```text
+anubis-host.exe broker-client --name AnubisHost --stdio
+stdin:
+{"version":1,"operation":"redeem-native-password","contextId":"<32hex>","admissionId":"<64hex>"}
+```
+
+The helper verifies the actual Running SCM broker PID, image and SYSTEM token.
+The broker only redeems for an actual unrestricted SYSTEM/session-0 helper
+process with the exact protected installed helper image, whose OS-reported
+immediate parent is the retained runtime PID, with a newer full creation time.
+The retained parent's full creation and current canonical ownership are
+rechecked, not supplied by JSON. An arbitrary BA client cannot redeem an
+admission or substitute a helper/runtime/caller identity. SYSTEM/code injection
+or a privileged attacker modifying the protected package/SCM is outside this
+boundary; this is not isolation from an already compromised LocalSystem.
+
+Redemption expires after five seconds, is consumed exactly once and returns
+the following as `response.result` only to that verified private helper:
+
+```text
+{admissionId, operation:"native-password-update", contextId,
+ runtime:{pid,creationTime},
+ caller:{sid,account,elevated,sessionId,pid,logonSid,creationTime},
+ oldPassword, newPassword}
+```
+
+`creationTime` is exactly 16 lowercase hex digits: unsigned full Windows
+FILETIME high DWORD followed by low DWORD, never rounded JS milliseconds.
+The runtime checks operation/admission/context/own PID and uses ONLY this
+redeemed payload. It must establish that config was successfully decrypted
+and readable, then allow provisioning ONLY for genuinely absent/empty
+salt+hash. Metadata-only documents, decryption/read errors or incomplete
+salt/hash must fail closed. For initialized profiles it must verify the
+existing application password with a pure verifier (not a side-effecting
+login/unlock function), then atomically compare-and-set the exact observed
+profile and await required session invalidation. A raw password setter alone
+does not satisfy this contract. No Windows password is involved.
+
+The runtime returns to the original control socket, within ten seconds total:
+
+```json
+{"version":1,"ok":true,"result":{"pid":123,"contextId":"<32hex>","admissionId":"<64hex>","committed":true}}
+```
+
+Known non-commit failures use `ok:false`, the same fully bound `result` with
+`committed:false`, and `error:{"code":"<fixed code>"}`. Allowlisted codes:
+`ERR_NATIVE_PASSWORD_INVALID_INPUT`, `ERR_NATIVE_PASSWORD_OLD_PASSWORD`,
+`ERR_NATIVE_PASSWORD_PROFILE_UNAVAILABLE`, `ERR_NATIVE_PASSWORD_CONFLICT`,
+`ERR_NATIVE_PASSWORD_STORAGE`. If storage committed but invalidation failed,
+use **`committed:true`, `ok:false`** and
+`ERR_NATIVE_PASSWORD_COMMITTED_INVALIDATION_FAILED`. Success is never emitted
+before invalidation, and this committed failure must not be retried as a reset.
+The runtime socket's existing five-second describe timeout must not truncate
+the new ten-second operation; keep describe behavior unchanged.
+
+If the protected helper fails or returns malformed data before invoking the
+updater, return the same bound `ok:false`, `committed:false` envelope with
+`ERR_NATIVE_PASSWORD_ADMISSION`, never fabricated `PROFILE_UNAVAILABLE`.
+The broker forwards that non-commit denial ONLY if its own record was never
+redeemed; it atomically revokes/clears the record before accepting the reply,
+so no late helper can redeem after an uncommitted denial. If already redeemed,
+this envelope instead becomes `ERR_NATIVE_PASSWORD_OUTCOME_UNKNOWN`, even
+when a failed/replayed helper says otherwise. Runtime reply/pending state
+must remain per socket/invocation and be marked before the first async wait;
+a duplicate BA packet must never overwrite the original reply callback.
+
+The outer broker response uses its existing string `error` field, forwarding
+only those fixed codes and the bound outcome. Expiry/replay/untrusted caller,
+runtime replacement or pipe ownership failure yields
+`ERR_NATIVE_PASSWORD_ADMISSION`; elevation requirements use
+`ERR_NATIVE_PASSWORD_ELEVATION_REQUIRED`. A timeout, lost/malformed reply or
+runtime loss after submission yields `ERR_NATIVE_PASSWORD_OUTCOME_UNKNOWN`,
+**not** a claim that storage did not commit. Do not automatically retry it.
+Unknown runtime errors, free-form messages and payloads are never forwarded.
+
+The service drops the pending operation on completion/error; it releases
+retained handles and clears its credential references. Request/response byte
+buffers are cleared. Go/JS strings and JSON internals are garbage-collected;
+this is memory-only transport, **not** a guarantee of forensic zeroization.
+No passwords, grants or raw requests enter argv, files, logs or test reports.
+Tests use synthetic passwords only. SCM/SYSTEM end-to-end provisioning and
+shell elevation still require a separate approved installed integration test;
+unit tests do not establish that product behavior.
 
 ### Protected downloaded-installer staging
 

@@ -196,9 +196,27 @@ async function startMachineHost (invocation) {
     child.once('exit', () => { failed(failure('ERR_MACHINE_BACKEND_EXIT')) })
     await waitForWorkspace(win, !!config.hashedPassword, deadline)
     phase = 'control'
+    let nativePasswordHandler
+    if (invocation.mode === 'system') {
+      const updatePassword = require('./profile-password').createProfilePasswordUpdater({
+        ...require('./db'),
+        invalidateSessions: async auth => {
+          await require('./managed-auth-invalidation').awaitManagedAuthInvalidation(child, auth)
+          globalState.set('requireAuth', true)
+          globalState.update('config', { requireAuth: auth.hashedPassword })
+        }
+      })
+      nativePasswordHandler = require('./native-password-runtime').createNativePasswordHandler({
+        helper,
+        serviceName: process.env.ANUBIS_MACHINE_CONTEXT_SERVICE,
+        contextId: invocation.contextId,
+        updatePassword
+      })
+    }
     control = createRuntimeControl({
       pipe: invocation.controlPipe,
       contextId: invocation.contextId,
+      nativePasswordHandler,
       getEndpoint: () => {
         if (!endpointReady) throw failure('ERR_ENGINE_NOT_READY')
         return {

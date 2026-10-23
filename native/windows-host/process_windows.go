@@ -39,17 +39,18 @@ type runtimeEndpoint struct {
 }
 
 type child struct {
-	Info      childInfo
-	process   windows.Handle
-	job       windows.Handle
-	stopFile  string
-	readyFile string
-	exit      chan struct{}
-	exitCode  uint32
-	waitErr   error
-	closeOnce sync.Once
-	errorFile string
-	logonSID  string
+	Info         childInfo
+	process      windows.Handle
+	job          windows.Handle
+	stopFile     string
+	readyFile    string
+	exit         chan struct{}
+	exitCode     uint32
+	waitErr      error
+	closeOnce    sync.Once
+	errorFile    string
+	logonSID     string
+	creationTime string
 }
 
 func randomID() (string, error) {
@@ -293,6 +294,10 @@ func (c *child) start(token windows.Token, exe string, args []string, cwd string
 	defer windows.CloseHandle(proc.Thread)
 	if err = windows.AssignProcessToJobObject(c.job, proc.Process); err != nil {
 		return errors.Join(fmt.Errorf("AssignProcessToJobObject: %w", err), windows.TerminateProcess(proc.Process, 1))
+	}
+	c.creationTime, err = processCreation(c.process)
+	if err != nil {
+		return err
 	}
 	var actual windows.Token
 	if err = windows.OpenProcessToken(proc.Process, windows.TOKEN_QUERY, &actual); err != nil {

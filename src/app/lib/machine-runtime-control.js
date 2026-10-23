@@ -1,6 +1,7 @@
 const net = require('node:net')
+const { validOutcome, CORE_CODES } = require('./native-password-client')
 
-function createRuntimeControl ({ pipe, contextId, getEndpoint, onError, onFatal = onError }) {
+function createRuntimeControl ({ pipe, contextId, getEndpoint, nativePasswordHandler, onError, onFatal = onError }) {
   const sockets = new Set()
   const server = net.createServer(socket => {
     if (sockets.size >= 8) {
@@ -29,6 +30,38 @@ function createRuntimeControl ({ pipe, contextId, getEndpoint, onError, onFatal 
         input = JSON.parse(request.subarray(0, end).toString('utf8'))
       } catch {
         return reject()
+      }
+      if (input?.operation === 'native-password-update' && typeof nativePasswordHandler === 'function') {
+        if (Object.keys(input).sort().join(',') !== 'admissionId,contextId,operation,version' ||
+            input.version !== 1 || input.contextId !== contextId ||
+            typeof input.admissionId !== 'string' || !/^[a-f0-9]{64}$/.test(input.admissionId) ||
+            request.subarray(end + 1).toString().trim()) return reject()
+        answered = true
+        socket.setTimeout(10000, () => socket.destroy())
+        const deadline = setTimeout(() => socket.destroy(), 10000)
+        deadline.unref()
+        socket.once('close', () => clearTimeout(deadline))
+        Promise.resolve().then(() => nativePasswordHandler(input)).then(value => {
+          const result = value?.result
+          const successful = value?.ok === true && result?.committed === true &&
+            Object.keys(value).sort().join(',') === 'ok,result,version'
+          const denied = value?.ok === false && result?.committed === false &&
+            (CORE_CODES.has(value.error?.code) || value.error?.code === 'ERR_NATIVE_PASSWORD_ADMISSION')
+          const committedFailure = value?.ok === false && result?.committed === true &&
+            value.error?.code === 'ERR_NATIVE_PASSWORD_COMMITTED_INVALIDATION_FAILED'
+          const failed = (denied || committedFailure) &&
+            Object.keys(value).sort().join(',') === 'error,ok,result,version' &&
+            Object.keys(value.error).join(',') === 'code'
+          if (value?.version !== 1 || (!successful && !failed) ||
+              !validOutcome(result, contextId, input.admissionId) || result.pid !== process.pid) {
+            throw new Error('Invalid native password outcome')
+          }
+          reply(value)
+        }).catch(() => {
+          socket.destroy()
+          onError(new Error('Native password operation outcome is unknown'))
+        })
+        return
       }
       if (!input || typeof input !== 'object' || Array.isArray(input) ||
           Object.keys(input).length !== 2 || input.version !== 1 || input.operation !== 'describe' ||

@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld('anubisHost', {
   list: () => ipcRenderer.invoke('machine-client-list'),
   connect: selection => ipcRenderer.invoke('machine-client-connect', selection),
   elevate: () => ipcRenderer.invoke('machine-client-elevate'),
+  passwordSettings: () => ipcRenderer.invoke('machine-client-password-settings'),
   update: () => ipcRenderer.invoke('machine-client-update'),
   openIntent: () => ipcRenderer.invoke('machine-client-intent'),
   clearIntents: () => ipcRenderer.invoke('machine-client-intent-clear'),

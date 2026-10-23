@@ -19,13 +19,16 @@ import (
 )
 
 type request struct {
-	Version    int     `json:"version"`
-	Operation  string  `json:"operation"`
-	Target     string  `json:"target,omitempty"`
-	SessionID  *uint32 `json:"sessionId,omitempty"`
-	AccountSID string  `json:"accountSid,omitempty"`
-	LogonSID   string  `json:"logonSid,omitempty"`
-	ContextID  string  `json:"contextId,omitempty"`
+	Version     int     `json:"version"`
+	Operation   string  `json:"operation"`
+	Target      string  `json:"target,omitempty"`
+	SessionID   *uint32 `json:"sessionId,omitempty"`
+	AccountSID  string  `json:"accountSid,omitempty"`
+	LogonSID    string  `json:"logonSid,omitempty"`
+	ContextID   string  `json:"contextId,omitempty"`
+	AdmissionID string  `json:"admissionId,omitempty"`
+	OldPassword *string `json:"oldPassword,omitempty"`
+	NewPassword *string `json:"newPassword,omitempty"`
 }
 
 type response struct {
@@ -36,13 +39,15 @@ type response struct {
 }
 
 type broker struct {
-	config   config
-	logger   *log.Logger
-	mu       sync.Mutex
-	machine  *child
-	contexts map[string]*child
-	stopping bool
-	monitors sync.WaitGroup
+	config      config
+	logger      *log.Logger
+	mu          sync.Mutex
+	machine     *child
+	contexts    map[string]*child
+	stopping    bool
+	monitors    sync.WaitGroup
+	admissionMu sync.Mutex
+	admission   *passwordAdmission
 }
 
 func pipePath(name string) (string, error) {
@@ -52,17 +57,17 @@ func pipePath(name string) (string, error) {
 	return `\\.\pipe\` + name + "-broker-v1", nil
 }
 
-func authenticate(conn net.Conn) (identity, error) {
+func authenticate(conn net.Conn) (*authenticatedCaller, error) {
 	f, ok := conn.(interface{ Fd() uintptr })
 	if !ok {
-		return identity{}, errors.New("named-pipe connection has no native handle")
+		return nil, errors.New("named-pipe connection has no native handle")
 	}
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	proc := windows.NewLazySystemDLL("advapi32.dll").NewProc("ImpersonateNamedPipeClient")
 	result, _, callErr := proc.Call(f.Fd())
 	if result == 0 {
-		return identity{}, fmt.Errorf("ImpersonateNamedPipeClient: %w", callErr)
+		return nil, fmt.Errorf("ImpersonateNamedPipeClient: %w", callErr)
 	}
 	impersonating := true
 	defer func() {
@@ -75,7 +80,7 @@ func authenticate(conn net.Conn) (identity, error) {
 	}()
 	var token windows.Token
 	if err := windows.OpenThreadToken(windows.CurrentThread(), windows.TOKEN_QUERY, true, &token); err != nil {
-		return identity{}, err
+		return nil, err
 	}
 	defer token.Close()
 	// Identification-level clients permit token inspection, not LSA/network access.
@@ -86,28 +91,31 @@ func authenticate(conn net.Conn) (identity, error) {
 	impersonating = false
 	i, err := tokenIdentity(token, 0)
 	if err != nil {
-		return i, err
+		return nil, err
 	}
 	restricted, err := token.IsRestricted()
 	if err != nil {
-		return i, err
+		return nil, err
 	}
 	admins, err := windows.StringToSid("S-1-5-32-544")
 	if err != nil {
-		return i, err
+		return nil, err
 	}
 	member, err := token.IsMember(admins)
 	if err != nil {
-		return i, err
+		return nil, err
 	}
 	if restricted || (i.SID != "S-1-5-18" && (!member || !i.Elevated)) {
-		return i, errors.New("broker requires LocalSystem or an elevated local administrator")
+		return nil, errors.New("broker requires LocalSystem or an elevated local administrator")
 	}
-	return i, nil
+	return captureCaller(windows.Handle(f.Fd()), token, i)
 }
 
 func decodeRequest(raw []byte) (request, error) {
 	var req request
+	if len(raw) > nativeFrameLimit {
+		return req, errors.New("ERR_NATIVE_PASSWORD_REQUEST")
+	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&req); err != nil {
@@ -118,6 +126,12 @@ func decodeRequest(raw []byte) (request, error) {
 	}
 	if req.Version != 1 {
 		return req, errors.New("unsupported broker version")
+	}
+	if nativePasswordOperation(req.Operation) {
+		return req, validatePasswordRequest(raw, req)
+	}
+	if len(raw) > 8192 || req.AdmissionID != "" || req.OldPassword != nil || req.NewPassword != nil {
+		return req, errors.New("unexpected or oversized broker request")
 	}
 	switch req.Operation {
 	case "identity", "list-sessions", "list-contexts":
@@ -153,8 +167,12 @@ func decodeRequest(raw []byte) (request, error) {
 	return req, nil
 }
 
-func (b *broker) dispatch(ctx context.Context, req request) (any, error) {
+func (b *broker) dispatch(ctx context.Context, req request, caller *authenticatedCaller) (any, error) {
 	switch req.Operation {
+	case "native-password-update":
+		return b.updateNativePassword(ctx, req, caller)
+	case "redeem-native-password":
+		return b.redeemNativePassword(req, caller)
 	case "identity":
 		host, err := currentIdentity()
 		if err != nil {
@@ -331,23 +349,28 @@ func (b *broker) serve(ctx context.Context, listener net.Listener) error {
 				b.logger.Printf("broker deadline: %v", err)
 				return
 			}
-			raw, err := bufio.NewReaderSize(conn, 8192).ReadSlice('\n')
+			raw, err := bufio.NewReaderSize(conn, nativeFrameLimit).ReadSlice('\n')
+			defer clear(raw)
 			if err != nil {
 				b.logger.Print("broker rejected incomplete or oversized request")
 				return
 			}
 			caller, err := authenticate(conn)
+			if caller != nil {
+				defer caller.close()
+			}
 			reply := response{Version: 1}
 			if err != nil {
 				reply.Error = "access denied: elevated local administrator required"
 				b.logger.Printf("broker authentication denied: %v", err)
 			} else {
 				req, err := decodeRequest(raw)
+				defer clearRequestSecrets(&req)
 				if err != nil {
 					reply.Error = err.Error()
 				} else {
 					b.logger.Printf("broker caller=%s operation=%s", caller.SID, req.Operation)
-					reply.Result, err = b.dispatch(ctx, req)
+					reply.Result, err = b.dispatch(ctx, req, caller)
 					if err != nil {
 						reply.Error = err.Error()
 					} else {
@@ -358,6 +381,7 @@ func (b *broker) serve(ctx context.Context, listener net.Listener) error {
 			if err := json.NewEncoder(conn).Encode(reply); err != nil {
 				b.logger.Printf("broker reply write: %v", err)
 			}
+			reqSecretsClear(&reply)
 		}()
 	}
 }

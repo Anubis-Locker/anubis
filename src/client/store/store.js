@@ -74,14 +74,13 @@ class Store {
     return store._leftSidePanelWidth
   }
 
-  // Keep compact chrome for narrow windows and split-terminal workspaces.
   // Every layout/footer/panel consumer uses this same measured column width.
   get leftSideBarWidth () {
     const { store } = window
     if (!store._leftSideBarOpen) {
       return 0
     }
-    return !store.isMobile && store.innerWidth >= 1100 ? 248 : sidebarWidth
+    return !store.isMobile ? 248 : sidebarWidth
   }
 
   // Same as leftSidePanelWidth: full-screen drawer on mobile, width not

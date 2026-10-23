@@ -73,23 +73,26 @@ export default class SettingCommon extends Component {
     this.setState({
       submittingPass: true
     })
-    const pass = this.state.loginPass
-    const r = await window.pre.runGlobalAsync(
-      'setPassword',
-      pass
-    )
-    await delay(600)
-    if (r === true) {
-      window.pre.requireAuth = !!pass
-      this.setState({
-        loginPass: pass ? '********' : '',
-        submittingPass: false,
-        placeholderLogin: pass ? '********' : e('notSet')
-      }, () => {
-        this.submitting = false
-      })
-      message.success('OK')
-    } else {
+    try {
+      const pass = this.state.loginPass
+      const r = await window.pre.runGlobalAsync(
+        'setPassword',
+        pass
+      )
+      await delay(600)
+      if (r === true) {
+        window.pre.requireAuth = !!pass
+        this.setState({
+          loginPass: pass ? '********' : '',
+          placeholderLogin: pass ? '********' : e('notSet')
+        })
+        message.success('OK')
+      } else {
+        message.error('Failed to update the login password')
+      }
+    } catch (err) {
+      message.error(err.message)
+    } finally {
       this.setState({
         submittingPass: false
       }, () => {

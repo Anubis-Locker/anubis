@@ -68,6 +68,37 @@ MCP renderer tools and revocation of active SSE/WebSocket streams. Its test-only
 fixture is `test/packaged/managed-live.js` in the Web repository; production
 mutations require explicit opt-in and are limited to its verified fresh identity.
 
+### Windows machine-workspace password
+
+The native machine client has a separate **SYSTEM password** action for the
+canonical machine workspace. In the normal, non-elevated client, approve the
+explicit Windows UAC prompt first. The same client restarts without credentials;
+click **SYSTEM password** again after restart and select the SYSTEM workspace.
+Cancelling UAC reclaims the existing client singleton. Pending connection
+requests must be cleared before this password-specific restart.
+
+An existing application password must come from the workspace owner and must
+be supplied to rotate it. Initial setup requires a genuinely uninitialized,
+readable profile. Windows/RDP credentials, administrator dashboard tokens and
+gateway grants do not replace that password. Unreadable encrypted data stops
+authentication and provisioning instead of being treated as a fresh or
+passwordless profile. Existing user-profile Settings still target that same
+user profile.
+
+This action requires a matching protected Windows broker/helper with the
+native password-admission protocol. Credentials travel only over private pipes
+after local OS-authorized admission; there is no Web RPC or remote reset API,
+password retrieval, password command-line argument or central plaintext store.
+Rotation preserves encryption keys and existing data, commits transactionally,
+and revokes active browser sessions before reporting success. Pending login
+and bootstrap results from before that revocation cannot issue new tokens or
+reuse an invalidated session. An explicitly committed failure or unknown outcome
+must not be automatically retried.
+
+This source integration has offline protocol/storage/UI-logic coverage only.
+It does not establish installed UAC, SCM/SYSTEM admission or live provisioning
+acceptance, and an older installed runtime/helper remains unsupported.
+
 ## Data folder and migration
 
 User data lives in the `anubis` folder under the OS app data directory
@@ -80,8 +111,10 @@ location, it is **copied** (never moved or deleted). The list of legacy folder n
 Chromium startup locks, caches and crash logs do not suppress migration. Existing
 application data and unrelated files prevent it; a copy failure stops startup
 instead of opening a new, empty database.
-Encrypted values (for example the storage key) are bound to the OS keychain; if they cannot be
-decrypted after migration, re-enter the affected passwords.
+Encrypted values (for example the storage key) are bound to the OS keychain.
+Unreadable encrypted profiles stop authentication and password setup; restore
+the correct OS account/keychain access rather than treating the profile as new
+or resetting its storage keys.
 
 ## Admin vs. user settings
 

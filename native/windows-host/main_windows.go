@@ -150,17 +150,25 @@ func command(args []string) error {
 			if *operation != "identity" || *target != "" || *sessionText != "" {
 				return errors.New("--stdio cannot be combined with selector flags")
 			}
-			raw, err := bufio.NewReaderSize(os.Stdin, 8192).ReadSlice('\n')
+			if err := privateStandardPipes(windows.Handle(os.Stdin.Fd()), windows.Handle(os.Stdout.Fd())); err != nil {
+				return err
+			}
+			raw, err := bufio.NewReaderSize(os.Stdin, nativeFrameLimit).ReadSlice('\n')
+			defer clear(raw)
 			if err != nil {
-				return errors.New("stdin must contain one newline-terminated JSON request under 8 KiB")
+				return errors.New("stdin must contain one bounded newline-terminated JSON request")
 			}
 			req, err := decodeRequest(raw)
+			defer clearRequestSecrets(&req)
 			if err != nil {
 				return err
 			}
 			return brokerClient(*name, req, true)
 		}
 		req := request{Version: 1, Operation: *operation, Target: *target}
+		if nativePasswordOperation(req.Operation) {
+			return errors.New("ERR_NATIVE_PASSWORD_PRIVATE_CHANNEL_REQUIRED")
+		}
 		if *sessionText != "" {
 			var err error
 			req.SessionID, err = parseSessionID(*sessionText)
@@ -350,6 +358,9 @@ func serviceCommand(operation, name string) error {
 }
 
 func brokerClient(name string, req request, private bool) error {
+	if nativePasswordOperation(req.Operation) && !private {
+		return errors.New("ERR_NATIVE_PASSWORD_PRIVATE_CHANNEL_REQUIRED")
+	}
 	path, err := pipePath(name)
 	if err != nil {
 		return err
@@ -370,7 +381,8 @@ func brokerClient(name string, req request, private bool) error {
 	if err := json.NewEncoder(conn).Encode(req); err != nil {
 		return err
 	}
-	raw, err := bufio.NewReaderSize(conn, 16384).ReadSlice('\n')
+	raw, err := bufio.NewReaderSize(conn, nativeFrameLimit).ReadSlice('\n')
+	defer clear(raw)
 	if err != nil {
 		return err
 	}
