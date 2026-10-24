@@ -3,7 +3,7 @@
 Терминал, удалённые подключения и передача файлов в одном рабочем пространстве.
 Desktop для Windows, macOS и Linux; отдельная Web-дистрибуция и управляемый доступ к одобренным устройствам.
 
-[Сайт](https://anubis.locker) · [Загрузки](https://download.anubis.locker) · [Документация](docs/wiki/Home.md) · [Сообщить об ошибке](https://github.com/Anubis-Locker/anubis/issues)
+[Сайт](https://anubis.locker) · [Загрузки](https://download.anubis.locker) · [Документация](https://docs.anubis.locker/) · [Сообщить об ошибке](https://github.com/Anubis-Locker/anubis/issues)
 
 > **Версии:** публичная поставка Desktop — **5.7.2**. [Исходники кандидата **5.7.3**](https://github.com/Anubis-Locker/anubis/tree/usability-repair-candidate) содержат исправления, но новый runtime ещё не установлен, не прошёл живую приёмку и не выпущен. Описание исходников не подтверждает возможности установленной версии. [Подробности](docs/wiki/Versions.md).
 
