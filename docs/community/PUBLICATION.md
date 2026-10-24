@@ -19,48 +19,52 @@
 
 | Имеющийся slug / группа | Новая страница |
 | --- | --- |
-| `Install-command` | Installation |
-| `RDP` | Remote-desktop |
-| `Profile`, `Default-Profile` | Profiles-and-passwords |
-| `Quick-connect`, `Start-session` | Quick-start |
-| `Batch-operation`, `Quick-commands`, `Data-import` | Bookmarks-and-batch |
-| `AI-model-config-guide`, `AI-bookmark`, `Theme-AI-editor` | AI |
-| `Custom-sync-server`, `WebDAV-sync`, `Create-personal-access-token`, `gitee-data-sync-warning` | Sync-and-backup |
-| `privacy-notice` | Security-and-privacy |
-| `Know-issues` | Troubleshooting |
-| `Common-settings`, `Layout`, `Terminal-config` | Configuration |
-| `How-to-use-ssh-tunnel`, `SSH-Key-Content-vs-Key-Path`, `SSH-agent`, `Connection-Hopping-Behavior-Change`, `Warning-about-sftp-follow-ssh-path-function` | SSH-and-files |
-| `Widgets` | MCP как начальная навигация; не выдавать её за полный каталог виджетов |
+| `Install-command` | [Installation](../wiki/Installation.md) |
+| `RDP` | [Remote-desktop](../wiki/Remote-desktop.md) |
+| `Profile`, `Default-Profile` | [Profiles-and-passwords](../wiki/Profiles-and-passwords.md) |
+| `Quick-connect`, `Start-session` | [Quick-start](../wiki/Quick-start.md) |
+| `Batch-operation`, `Quick-commands`, `Data-import` | [Bookmarks-and-batch](../wiki/Bookmarks-and-batch.md) |
+| `AI-model-config-guide`, `AI-bookmark`, `Theme-AI-editor` | [AI](../wiki/AI.md); stub endpoint не подтверждает работающую генерацию, в том числе тем |
+| `Custom-sync-server`, `WebDAV-sync`, `Create-personal-access-token`, `gitee-data-sync-warning` | [Sync-and-backup](../wiki/Sync-and-backup.md); это раздел о синхронизации/секретах, не обещание актуального интерфейса стороннего провайдера |
+| `privacy-notice` | [Security-and-privacy](../wiki/Security-and-privacy.md) |
+| `Know-issues` | [Troubleshooting](../wiki/Troubleshooting.md) |
+| `Common-settings`, `Layout`, `Terminal-config` | [Configuration](../wiki/Configuration.md) |
+| `How-to-use-ssh-tunnel`, `SSH-Key-Content-vs-Key-Path`, `SSH-agent`, `Connection-Hopping-Behavior-Change`, `Warning-about-sftp-follow-ssh-path-function` | [SSH-and-files](../wiki/SSH-and-files.md) |
+| `Widgets` | [MCP](../wiki/MCP.md) как навигация к конкретному виджету; не полный каталог и не реализация PRO Plugin Store |
+| `Use-X11` | [Use-X11](../wiki/Use-X11.md); X11 через connection hopping не заявлен поддерживаемым текущим путём, Web не рисует X11 |
+| `proxy-format` | [proxy-format](../wiki/proxy-format.md); HTTPS proxy не заявлен рабочим для текущего SSH/TCP connector |
+| `Mouse-events-require-alt` | [Mouse-events-require-alt](../wiki/Mouse-events-require-alt.md); колесо не ограничивается Alt gate |
+| `Terminal-keywords-highlight-regular-expression-exmaples` | [Terminal-keywords-highlight-regular-expression-exmaples](../wiki/Terminal-keywords-highlight-regular-expression-exmaples.md); опечатка slug сохранена |
 
-Это карта редакционного соответствия, не готовые HTTP redirects и не исчерпывающее покрытие старых инструкций. Специализированные страницы `Use-X11`, `proxy-format`, `Mouse-events-require-alt` и `Terminal-keywords-highlight-regular-expression-exmaples` требуют отдельного точного руководства/сохранённого проверенного маршрута. Нельзя отправлять их на Home и считать содержание восстановленным.
+У каждого значения `brand.docs.pages` есть тематическое назначение в таблице. Это карта редакционного соответствия, не готовые HTTP redirects и не обещание полного восстановления прежних специализированных инструкций. Нельзя заменять эти маршруты общим Home. Ограничения четырёх специальных настроек описаны в отдельных source-guided страницах; они не подтверждают новую живую приёмку.
 
-Канонические `REMOTE-ACCESS.md`, `ADMIN-VS-USER.md`, `WINDOWS-INSTALLER.md`, `MACHINE-PROTOCOLS.md`, `EMBEDDED-WEBSITES.md`, `DEFAULTS.md` и `RELEASE.md` должны оставаться доступными по ссылкам из Wiki либо получить явно переписанные ссылки после переноса. Межпапочные ссылки на `community` также адаптируются к публичному размещению.
+Канонические `REMOTE-ACCESS.md`, `ADMIN-VS-USER.md`, `WINDOWS-INSTALLER.md`, `MACHINE-PROTOCOLS.md`, `EMBEDDED-WEBSITES.md`, `DEFAULTS.md` и `RELEASE.md` должны оставаться доступными по ссылкам из Wiki либо получить явно переписанные ссылки после переноса. Межпапочные ссылки на `community`, source-файлы и `package.json` также адаптируются к публичному размещению.
 
 ## Предложение: ровно 20 topics основного приложения
 
-Это GitHub repository topics, не категории Discussions. Они описывают возможности, а не статус релиза или аудит безопасности.
+Это GitHub repository topics, не категории Discussions. Список согласован с утверждённым планом основного приложения; он описывает возможности, а не статус релиза или аудит безопасности.
 
 ```text
 anubis
+anubis-security-tool
 terminal
 ssh
 sftp
 ftp
-telnet
-serial-port
 rdp
 vnc
 spice
-remote-access
-connection-manager
-file-transfer
+telnet
+serial-port
 electron
-react
+remote-access
 windows
 macos
 linux
-model-context-protocol
+mcp
 self-hosted
+developer-tools
+system-administration
 ```
 
 Topics остальных трёх проектных репозиториев определяются по их собственным исходникам отдельно. Здесь они не назначены. Несвязанные репозитории организации в этот пакет не входят.

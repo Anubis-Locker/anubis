@@ -10,12 +10,16 @@
 ## Подключения и данные
 
 - [SSH, SFTP, FTP](SSH-and-files.md)
+- [X11 через SSH](Use-X11.md)
+- [Формат прокси](proxy-format.md)
 - [RDP, VNC, SPICE](Remote-desktop.md)
 - [Serial и Telnet](Serial-and-Telnet.md)
 - [Закладки и batch](Bookmarks-and-batch.md)
 - [Профили и пароли](Profiles-and-passwords.md)
 - [Синхронизация и backup](Sync-and-backup.md)
 - [Настройки](Configuration.md)
+- [Мышь и Alt](Mouse-events-require-alt.md)
+- [Regex-подсветка](Terminal-keywords-highlight-regular-expression-exmaples.md)
 
 ## Управление и интеграции
 

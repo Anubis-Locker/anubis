@@ -9,6 +9,7 @@ Anubis объединяет терминалы, подключения к сер
 | Установить и подключиться впервые | [Установка](Installation.md), [первое подключение](Quick-start.md) |
 | Выбрать Desktop или Web | [Режимы работы](Modes.md), [удалённый доступ](Remote-access.md) |
 | Подключиться к серверу | [SSH/SFTP/FTP](SSH-and-files.md), [RDP/VNC/SPICE](Remote-desktop.md), [serial/Telnet](Serial-and-Telnet.md) |
+| Настроить специальные параметры | [X11](Use-X11.md), [прокси](proxy-format.md), [мышь и Alt](Mouse-events-require-alt.md), [regex-подсветка](Terminal-keywords-highlight-regular-expression-exmaples.md) |
 | Упорядочить работу | [Закладки и batch](Bookmarks-and-batch.md), [профили](Profiles-and-passwords.md), [настройки](Configuration.md) |
 | Управлять устройствами | [Windows-контексты](Windows-workspaces.md), [регистрация и отзыв](Managed-access.md), [Web-вход](Web-auth.md) |
 | Интегрировать инструменты | [MCP](MCP.md), [AI](AI.md), [синхронизация](Sync-and-backup.md) |
